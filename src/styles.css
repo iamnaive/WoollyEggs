@@ -1,0 +1,169 @@
+:root {
+  color-scheme: only light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+body {
+  font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.app-shell {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.reveal-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  --mx: 50%;
+  --my: 50%;
+  --reveal-radius: 120px;
+  --reveal-soft: 56px;
+  --top-bg: linear-gradient(135deg, #f2f5ff 0%, #dce7ff 50%, #bfcff8 100%);
+  --under-bg: linear-gradient(135deg, #fff3e3 0%, #ffd2b0 45%, #d9addb 100%);
+}
+
+.canvas-host {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #ffffff;
+}
+
+.canvas-host canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.css-fallback-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.css-fallback-under,
+.css-fallback-top {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.css-fallback-under {
+  background-image: var(--under-bg);
+}
+
+.css-fallback-top {
+  background-image: var(--top-bg);
+  mask-image: radial-gradient(
+    circle at var(--mx) var(--my),
+    transparent 0,
+    transparent var(--reveal-radius),
+    black calc(var(--reveal-radius) + var(--reveal-soft))
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at var(--mx) var(--my),
+    transparent 0,
+    transparent var(--reveal-radius),
+    black calc(var(--reveal-radius) + var(--reveal-soft))
+  );
+}
+
+.vignette-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: radial-gradient(circle at center, transparent 40%, rgba(0, 0, 0, 0.18) 100%);
+  mix-blend-mode: multiply;
+}
+
+.grain-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: -100%;
+  z-index: 4;
+  opacity: 0.055;
+  mix-blend-mode: soft-light;
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.6) 0.4px, transparent 0.45px);
+  background-size: 3px 3px;
+  animation: grain-shift 1.2s steps(2) infinite;
+}
+
+@keyframes grain-shift {
+  0% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(10%, -8%);
+  }
+  50% {
+    transform: translate(-6%, 7%);
+  }
+  75% {
+    transform: translate(7%, 10%);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+.hint-icon {
+  pointer-events: none;
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  width: 18px;
+  height: 18px;
+  color: rgba(255, 255, 255, 0.78);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+  animation: hint-fade 0.7s ease 2s forwards;
+}
+
+.hint-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+@keyframes hint-fade {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain-overlay {
+    animation: none;
+  }
+}
