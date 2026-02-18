@@ -70,7 +70,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     const verified = BASE_SET.has(normalized);
 
     if (!verified) {
-      res.status(200).json({ ok: true, verified: false });
+      res.status(400).json({ ok: false, error: "error", verified: false });
       return;
     }
 

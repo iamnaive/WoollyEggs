@@ -5,39 +5,9 @@ const TOP_IMAGE = "/reveal/top.avif";
 const UNDER_IMAGE = "/reveal/under.avif";
 const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
-type Vec2 = { x: number; y: number };
 type CaptureStatus = "idle" | "loading" | "saved" | "error";
 
-function createPlaceholderTexture(colors: [string, string, string]): THREE.Texture {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = 1024;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    const texture = new THREE.Texture();
-    texture.needsUpdate = true;
-    return texture;
-  }
-
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, colors[0]);
-  gradient.addColorStop(0.5, colors[1]);
-  gradient.addColorStop(1, colors[2]);
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  return texture;
-}
-
-function loadTextureWithPlaceholder(
-  loader: THREE.TextureLoader,
-  path: string,
-  placeholder: THREE.Texture
-): Promise<{ texture: THREE.Texture; loaded: boolean }> {
+function loadTexture(loader: THREE.TextureLoader, path: string): Promise<THREE.Texture | null> {
   return new Promise((resolve) => {
     loader.load(
       path,
@@ -47,10 +17,10 @@ function loadTextureWithPlaceholder(
         texture.magFilter = THREE.LinearFilter;
         texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
-        resolve({ texture, loaded: true });
+        resolve(texture);
       },
       undefined,
-      () => resolve({ texture: placeholder, loaded: false })
+      () => resolve(null)
     );
   });
 }
@@ -94,7 +64,9 @@ export default function MouseReveal(): JSX.Element {
       const data = (await response.json()) as { ok?: boolean; verified?: boolean; inserted?: boolean; error?: string };
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Request failed");
+        setStatus("error");
+        setStatusMessage("error");
+        return;
       }
 
       if (data.verified) {
@@ -113,11 +85,11 @@ export default function MouseReveal(): JSX.Element {
         }
       } else {
         setStatus("error");
-        setStatusMessage("Address not verified");
+        setStatusMessage("error");
       }
     } catch {
       setStatus("error");
-      setStatusMessage("Request failed");
+      setStatusMessage("error");
     }
   };
 
@@ -164,47 +136,53 @@ export default function MouseReveal(): JSX.Element {
     host.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-
-    const placeholderTop = createPlaceholderTexture(["#f4f7ff", "#dde7ff", "#bfcef7"]);
-    const placeholderUnder = createPlaceholderTexture(["#fff4df", "#ffd0ae", "#e0b1dd"]);
-
     const loader = new THREE.TextureLoader();
     let destroyed = false;
+    let topTexture: THREE.Texture | null = null;
+    let underTexture: THREE.Texture | null = null;
+    let material: THREE.ShaderMaterial | null = null;
+    let geometry: THREE.PlaneGeometry | null = null;
 
-    const uniforms = {
-      uTop: { value: placeholderTop },
-      uUnder: { value: placeholderUnder },
-      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-      uCursor: { value: new THREE.Vector2(0.5, 0.5) },
-      uParallax: { value: new THREE.Vector2(0.0, 0.0) },
-      uRadius: { value: 0.18 },
-      uFeather: { value: 0.08 },
-      uTime: { value: 0.0 },
-      uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 }
-    };
+    Promise.all([loadTexture(loader, TOP_IMAGE), loadTexture(loader, UNDER_IMAGE)]).then(([top, under]) => {
+      if (destroyed) {
+        top?.dispose();
+        under?.dispose();
+        return;
+      }
 
-    loadTextureWithPlaceholder(loader, TOP_IMAGE, placeholderTop).then(({ texture, loaded }) => {
-      if (destroyed) return;
-      uniforms.uTop.value = texture;
-      setTopLoaded(loaded);
-    });
+      topTexture = top;
+      underTexture = under;
+      setTopLoaded(Boolean(top));
+      setUnderLoaded(Boolean(under));
 
-    loadTextureWithPlaceholder(loader, UNDER_IMAGE, placeholderUnder).then(({ texture, loaded }) => {
-      if (destroyed) return;
-      uniforms.uUnder.value = texture;
-      setUnderLoaded(loaded);
-    });
+      // Use only reveal/top.avif and reveal/under.avif; if any is missing, use CSS fallback with same files.
+      if (!top || !under) {
+        setUseCssFallback(true);
+        return;
+      }
 
-    const material = new THREE.ShaderMaterial({
-      uniforms,
-      vertexShader: `
+      const uniforms = {
+        uTop: { value: top },
+        uUnder: { value: under },
+        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        uCursor: { value: new THREE.Vector2(0.5, 0.5) },
+        uParallax: { value: new THREE.Vector2(0.0, 0.0) },
+        uRadius: { value: 0.18 },
+        uFeather: { value: 0.08 },
+        uTime: { value: 0.0 },
+        uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 }
+      };
+
+      material = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: `
             varying vec2 vUv;
             void main() {
               vUv = uv;
               gl_Position = vec4(position, 1.0);
             }
           `,
-      fragmentShader: `
+        fragmentShader: `
             varying vec2 vUv;
             uniform sampler2D uTop;
             uniform sampler2D uUnder;
@@ -276,10 +254,33 @@ export default function MouseReveal(): JSX.Element {
               gl_FragColor = vec4(composed.rgb, 1.0);
             }
           `
-    });
+      });
 
-    const geometry = new THREE.PlaneGeometry(2, 2);
-    scene.add(new THREE.Mesh(geometry, material));
+      geometry = new THREE.PlaneGeometry(2, 2);
+      scene.add(new THREE.Mesh(geometry, material));
+
+      const animate = (): void => {
+        if (destroyed || !material) return;
+
+        const delta = clock.getDelta();
+        const elapsed = clock.getElapsedTime();
+
+        const lerpAmt = reducedMotion ? 1.0 : 1.0 - Math.pow(0.0006, delta);
+        pointer.x += (target.x - pointer.x) * lerpAmt;
+        pointer.y += (target.y - pointer.y) * lerpAmt;
+        parallax.x += (parallaxTarget.x - parallax.x) * lerpAmt;
+        parallax.y += (parallaxTarget.y - parallax.y) * lerpAmt;
+
+        material.uniforms.uCursor.value.set(pointer.x, 1.0 - pointer.y);
+        material.uniforms.uParallax.value.set(parallax.x, -parallax.y);
+        material.uniforms.uTime.value = elapsed;
+        material.uniforms.uReducedMotion.value = reducedMotion ? 1.0 : 0.0;
+
+        renderer.render(scene, new THREE.Camera());
+        requestAnimationFrame(animate);
+      };
+      animate();
+    });
 
     const onResize = (): void => {
       const width = window.innerWidth;
@@ -287,7 +288,9 @@ export default function MouseReveal(): JSX.Element {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       renderer.setPixelRatio(dpr);
       renderer.setSize(width, height, false);
-      uniforms.uResolution.value.set(width, height);
+      if (material) {
+        material.uniforms.uResolution.value.set(width, height);
+      }
     };
     onResize();
     window.addEventListener("resize", onResize, { passive: true });
@@ -318,27 +321,6 @@ export default function MouseReveal(): JSX.Element {
     root.addEventListener("pointermove", onPointerMove, { passive: true });
 
     const clock = new THREE.Clock();
-    const animate = (): void => {
-      if (destroyed) return;
-
-      const delta = clock.getDelta();
-      const elapsed = clock.getElapsedTime();
-
-      const lerpAmt = reducedMotion ? 1.0 : 1.0 - Math.pow(0.0006, delta);
-      pointer.x += (target.x - pointer.x) * lerpAmt;
-      pointer.y += (target.y - pointer.y) * lerpAmt;
-      parallax.x += (parallaxTarget.x - parallax.x) * lerpAmt;
-      parallax.y += (parallaxTarget.y - parallax.y) * lerpAmt;
-
-      uniforms.uCursor.value.set(pointer.x, 1.0 - pointer.y);
-      uniforms.uParallax.value.set(parallax.x, -parallax.y);
-      uniforms.uTime.value = elapsed;
-      uniforms.uReducedMotion.value = reducedMotion ? 1.0 : 0.0;
-
-      renderer.render(scene, new THREE.Camera());
-      requestAnimationFrame(animate);
-    };
-    animate();
 
     return () => {
       destroyed = true;
@@ -346,10 +328,10 @@ export default function MouseReveal(): JSX.Element {
       root.removeEventListener("pointermove", onPointerMove);
       reducedMotionQuery.removeEventListener?.("change", onReducedMotionChange);
 
-      material.dispose();
-      geometry.dispose();
-      placeholderTop.dispose();
-      placeholderUnder.dispose();
+      material?.dispose();
+      geometry?.dispose();
+      topTexture?.dispose();
+      underTexture?.dispose();
       renderer.dispose();
 
       if (renderer.domElement.parentNode === host) {

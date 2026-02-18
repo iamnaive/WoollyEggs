@@ -43,8 +43,8 @@ body {
   --my: 50%;
   --reveal-radius: 118px;
   --reveal-soft: 46px;
-  --top-bg: linear-gradient(135deg, #f4f7ff 0%, #dde7ff 50%, #bfcef7 100%);
-  --under-bg: linear-gradient(135deg, #fff4df 0%, #ffd0ae 48%, #e0b1dd 100%);
+  --top-bg: url("/reveal/top.avif");
+  --under-bg: url("/reveal/under.avif");
   --fallback-top-shift-x: 0px;
   --fallback-top-shift-y: 0px;
   --fallback-under-shift-x: 0px;
@@ -178,8 +178,6 @@ body {
   border-radius: 24px;
   border: 1px solid #9eaad34f;
   background: linear-gradient(135deg, #111522c2 0%, #181f33b8 100%);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow:
     0 28px 64px #0b0f1d66,
     0 8px 20px #00000040,
@@ -239,12 +237,11 @@ body {
   font-size: 16px;
   cursor: pointer;
   transform: translateY(0);
-  transition: transform 180ms ease, filter 180ms ease;
+  transition: transform 180ms ease;
 }
 
 .address-submit:hover:not(:disabled) {
   transform: translateY(-1px);
-  filter: brightness(1.05);
 }
 
 .address-submit:active:not(:disabled) {
@@ -304,7 +301,6 @@ body {
   width: 17px;
   height: 17px;
   color: #f8fbff;
-  filter: drop-shadow(0 1px 2px #0000003d);
   animation: hint-fade 0.8s ease 2s forwards;
 }
 
