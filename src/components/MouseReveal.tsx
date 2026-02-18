@@ -3,8 +3,6 @@ import * as THREE from "three";
 
 const TOP_IMAGE = "/reveal/top.avif";
 const UNDER_IMAGE = "/reveal/under.avif";
-const CURSOR_CLOSED = "/cursor/egg_closed.png";
-const CURSOR_OPEN = "/cursor/egg_open_wl.png";
 const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
 type Vec2 = { x: number; y: number };
@@ -57,39 +55,6 @@ function loadTextureWithPlaceholder(
   });
 }
 
-function makeCursorSvgData(open: boolean): string {
-  const wl = open
-    ? "<text x='56' y='74' text-anchor='middle' font-family='Inter,Arial' font-size='26' fill='%23ffffff' font-weight='700'>WL</text>"
-    : "";
-  const shellGap = open
-    ? "<ellipse cx='56' cy='64' rx='42' ry='20' fill='%237188bf' opacity='0.55'/>"
-    : "<ellipse cx='56' cy='68' rx='40' ry='26' fill='%23849ad0'/>";
-  const svg = `
-    <svg xmlns='http://www.w3.org/2000/svg' width='112' height='112' viewBox='0 0 112 112'>
-      <defs>
-        <linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
-          <stop offset='0' stop-color='%23a8b9e6'/>
-          <stop offset='1' stop-color='%23647eba'/>
-        </linearGradient>
-      </defs>
-      <ellipse cx='56' cy='58' rx='40' ry='46' fill='url(%23g)'/>
-      <ellipse cx='46' cy='38' rx='12' ry='8' fill='%23ffffff' opacity='0.55'/>
-      ${shellGap}
-      ${wl}
-    </svg>
-  `;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-function loadCursorAsset(path: string, fallback: string): Promise<string> {
-  return new Promise((resolve) => {
-    const image = new Image();
-    image.onload = () => resolve(path);
-    image.onerror = () => resolve(fallback);
-    image.src = path;
-  });
-}
-
 export default function MouseReveal(): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
@@ -102,30 +67,6 @@ export default function MouseReveal(): JSX.Element {
   const [address, setAddress] = useState("");
   const [status, setStatus] = useState<CaptureStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("");
-
-  const [cursorOpen, setCursorOpen] = useState(false);
-  const [cursorBump, setCursorBump] = useState(false);
-  const [cursorSuppressed, setCursorSuppressed] = useState(false);
-  const cursorSuppressedRef = useRef(false);
-  const [cursorClosedSrc, setCursorClosedSrc] = useState("");
-  const [cursorOpenSrc, setCursorOpenSrc] = useState("");
-
-  useEffect(() => {
-    let live = true;
-    void Promise.all([
-      loadCursorAsset(CURSOR_CLOSED, makeCursorSvgData(false)),
-      loadCursorAsset(CURSOR_OPEN, makeCursorSvgData(true))
-    ]).then(([closed, open]) => {
-      if (!live) {
-        return;
-      }
-      setCursorClosedSrc(closed);
-      setCursorOpenSrc(open);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
 
   useEffect(() => {
     const t = window.setTimeout(() => setEntered(true), 30);
@@ -181,10 +122,6 @@ export default function MouseReveal(): JSX.Element {
     const pointerTargetUv: Vec2 = { x: 0.5, y: 0.5 };
     const pointerCurrentUv: Vec2 = { x: 0.5, y: 0.5 };
     const pointerVelocityUv: Vec2 = { x: 0, y: 0 };
-    const pointerPixelCurrent: Vec2 = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
-    const pointerPixelTarget: Vec2 = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
-
-    const cursorVelocityPx: Vec2 = { x: 0, y: 0 };
     let radiusBase = 118;
     let radiusCurrent = 118;
     let radiusVelocity = 0;
@@ -208,19 +145,11 @@ export default function MouseReveal(): JSX.Element {
       const uv = toLocalUv(clientX, clientY);
       pointerTargetUv.x = uv.x;
       pointerTargetUv.y = uv.y;
-      pointerPixelTarget.x = clientX;
-      pointerPixelTarget.y = clientY;
     };
 
     const onPointerMove = (event: PointerEvent): void => {
       if (activePointerId !== null && event.pointerId !== activePointerId) {
         return;
-      }
-      const target = event.target as HTMLElement | null;
-      const nextSuppressed = Boolean(target?.closest(".under-layer-mask"));
-      if (nextSuppressed !== cursorSuppressedRef.current) {
-        cursorSuppressedRef.current = nextSuppressed;
-        setCursorSuppressed(nextSuppressed);
       }
       trackPointer(event.clientX, event.clientY);
     };
@@ -239,15 +168,6 @@ export default function MouseReveal(): JSX.Element {
       radiusBase = 130;
       pulseVelocity += 880;
 
-      const target = event.target as HTMLElement | null;
-      if (!onTouch && !target?.closest(".under-layer-mask")) {
-        setCursorOpen((value) => !value);
-        if (!reducedMotion) {
-          setCursorBump(false);
-          window.requestAnimationFrame(() => setCursorBump(true));
-          window.setTimeout(() => setCursorBump(false), 260);
-        }
-      }
     };
 
     const onPointerUp = (): void => {
@@ -291,17 +211,8 @@ export default function MouseReveal(): JSX.Element {
         radiusVelocity *= Math.exp(-radiusDamping * dt);
         radiusCurrent += radiusVelocity * dt;
 
-        cursorVelocityPx.x += (pointerPixelTarget.x - pointerPixelCurrent.x) * 140 * dt;
-        cursorVelocityPx.y += (pointerPixelTarget.y - pointerPixelCurrent.y) * 140 * dt;
-        cursorVelocityPx.x *= Math.exp(-19 * dt);
-        cursorVelocityPx.y *= Math.exp(-19 * dt);
-        pointerPixelCurrent.x += cursorVelocityPx.x * dt;
-        pointerPixelCurrent.y += cursorVelocityPx.y * dt;
-
         root.style.setProperty("--mx", `${(pointerCurrentUv.x * 100).toFixed(3)}%`);
         root.style.setProperty("--my", `${((1 - pointerCurrentUv.y) * 100).toFixed(3)}%`);
-        root.style.setProperty("--cursor-x", `${pointerPixelCurrent.x.toFixed(2)}px`);
-        root.style.setProperty("--cursor-y", `${pointerPixelCurrent.y.toFixed(2)}px`);
         root.style.setProperty("--reveal-radius", `${radiusCurrent.toFixed(2)}px`);
         root.style.setProperty("--reveal-soft", `${(reducedMotion ? 34 : pressed ? 56 : 46).toFixed(2)}px`);
         root.style.setProperty("--fallback-top-shift-x", `${((pointerCurrentUv.x - 0.5) * 8).toFixed(2)}px`);
@@ -314,7 +225,6 @@ export default function MouseReveal(): JSX.Element {
           "--fallback-under-shift-y",
           `${((-pointerCurrentUv.y + 0.5) * 8).toFixed(2)}px`
         );
-        root.style.setProperty("--rim-intensity", "0");
 
         cssRafId = window.requestAnimationFrame(tick);
       };
@@ -489,13 +399,6 @@ export default function MouseReveal(): JSX.Element {
           radiusVelocity *= Math.exp(-(reducedMotion ? 26 : 16) * dt);
           radiusCurrent += radiusVelocity * dt;
 
-          cursorVelocityPx.x += (pointerPixelTarget.x - pointerPixelCurrent.x) * 140 * dt;
-          cursorVelocityPx.y += (pointerPixelTarget.y - pointerPixelCurrent.y) * 140 * dt;
-          cursorVelocityPx.x *= Math.exp(-19 * dt);
-          cursorVelocityPx.y *= Math.exp(-19 * dt);
-          pointerPixelCurrent.x += cursorVelocityPx.x * dt;
-          pointerPixelCurrent.y += cursorVelocityPx.y * dt;
-
           uniforms.uCursor.value.set(pointerCurrentUv.x, pointerCurrentUv.y);
           uniforms.uRadius.value = radiusCurrent;
           uniforms.uParallax.value.set((pointerCurrentUv.x - 0.5) * 17, (pointerCurrentUv.y - 0.5) * 13);
@@ -505,8 +408,6 @@ export default function MouseReveal(): JSX.Element {
 
           root.style.setProperty("--mx", `${(pointerCurrentUv.x * 100).toFixed(3)}%`);
           root.style.setProperty("--my", `${((1 - pointerCurrentUv.y) * 100).toFixed(3)}%`);
-          root.style.setProperty("--cursor-x", `${pointerPixelCurrent.x.toFixed(2)}px`);
-          root.style.setProperty("--cursor-y", `${pointerPixelCurrent.y.toFixed(2)}px`);
           root.style.setProperty("--reveal-radius", `${radiusCurrent.toFixed(2)}px`);
           root.style.setProperty("--reveal-soft", `${(reducedMotion ? 34 : pressed ? 56 : 46).toFixed(2)}px`);
           root.style.setProperty("--fallback-top-shift-x", `${((pointerCurrentUv.x - 0.5) * 8).toFixed(2)}px`);
@@ -519,7 +420,6 @@ export default function MouseReveal(): JSX.Element {
             "--fallback-under-shift-y",
             `${((-pointerCurrentUv.y + 0.5) * 8).toFixed(2)}px`
           );
-          root.style.setProperty("--rim-intensity", "0");
           renderer.render(scene, camera);
           rafId = window.requestAnimationFrame(animate);
         };
@@ -569,14 +469,10 @@ export default function MouseReveal(): JSX.Element {
     ? `url("${UNDER_IMAGE}")`
     : "linear-gradient(135deg, #fff3df 0%, #ffd1b2 50%, #dfb4dd 100%)";
 
-  const cursorImage = cursorOpen ? cursorOpenSrc || makeCursorSvgData(true) : cursorClosedSrc || makeCursorSvgData(false);
-
   return (
     <section
       ref={rootRef}
-      className={`reveal-root${useCssFallback ? " is-css-fallback" : ""}${entered ? " is-entered" : ""}${
-        cursorSuppressed ? " is-cursor-suppressed" : ""
-      }`}
+      className={`reveal-root${useCssFallback ? " is-css-fallback" : ""}${entered ? " is-entered" : ""}`}
       style={
         {
           "--top-bg": topBackground,
@@ -590,12 +486,8 @@ export default function MouseReveal(): JSX.Element {
         <div className="css-fallback-layer" aria-hidden>
           <div className="css-fallback-under" />
           <div className="css-fallback-top" />
-          <div className="css-fallback-rim" />
         </div>
       ) : null}
-
-      <div className="vignette-overlay" aria-hidden />
-      <div className="grain-overlay" aria-hidden />
 
       <div className="under-layer-mask">
         <form className="address-bar" onSubmit={handleAddressSubmit} noValidate>
@@ -615,14 +507,6 @@ export default function MouseReveal(): JSX.Element {
             spellCheck={false}
             placeholder="0x... Monad address"
             value={address}
-            onFocus={() => {
-              cursorSuppressedRef.current = true;
-              setCursorSuppressed(true);
-            }}
-            onBlur={() => {
-              cursorSuppressedRef.current = false;
-              setCursorSuppressed(false);
-            }}
             onChange={(event) => {
               setAddress(event.target.value);
               if (status !== "idle") {
@@ -656,8 +540,6 @@ export default function MouseReveal(): JSX.Element {
           />
         </svg>
       </div>
-
-      <div className={`custom-cursor${cursorBump ? " is-bump" : ""}`} style={{ backgroundImage: `url("${cursorImage}")` }} />
     </section>
   );
 }

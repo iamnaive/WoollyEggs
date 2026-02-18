@@ -21,6 +21,7 @@ body,
 body {
   font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: #ffffff;
+  cursor: auto;
 }
 
 .app-shell {
@@ -37,14 +38,11 @@ body {
   height: 100%;
   overflow: hidden;
   background: #ffffff;
-  cursor: none;
+  cursor: auto;
   --mx: 50%;
   --my: 50%;
-  --cursor-x: 50vw;
-  --cursor-y: 50vh;
   --reveal-radius: 118px;
   --reveal-soft: 46px;
-  --rim-intensity: 0.25;
   --top-bg: linear-gradient(135deg, #f4f7ff 0%, #dde7ff 50%, #bfcef7 100%);
   --under-bg: linear-gradient(135deg, #fff4df 0%, #ffd0ae 48%, #e0b1dd 100%);
   --fallback-top-shift-x: 0px;
@@ -59,10 +57,6 @@ body {
 .reveal-root.is-entered {
   transform: translate3d(0, 0, 0) scale(1);
   opacity: 1;
-}
-
-.reveal-root.is-touch {
-  cursor: auto;
 }
 
 .canvas-host {
@@ -301,56 +295,6 @@ body {
   color: #ff9db2;
 }
 
-.custom-cursor {
-  pointer-events: none;
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 7;
-  width: 54px;
-  height: 54px;
-  transform: translate3d(calc(var(--cursor-x) - 27px), calc(var(--cursor-y) - 27px), 0) rotate(0deg) scale(1);
-  background-position: center;
-  background-size: contain;
-  background-repeat: no-repeat;
-  filter:
-    drop-shadow(0 7px 14px #3f4d7034)
-    drop-shadow(0 2px 4px #00000024);
-  transition: opacity 180ms ease;
-}
-
-.custom-cursor::after {
-  content: "";
-  position: absolute;
-  inset: 6px 9px 26px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #ffffff8a 0%, #ffffff00 100%);
-  pointer-events: none;
-}
-
-.custom-cursor.is-bump {
-  animation: cursor-pop 240ms cubic-bezier(0.22, 0.9, 0.3, 1);
-}
-
-@keyframes cursor-pop {
-  0% {
-    transform: translate3d(calc(var(--cursor-x) - 27px), calc(var(--cursor-y) - 27px), 0) rotate(0deg) scale(1);
-  }
-  30% {
-    transform: translate3d(calc(var(--cursor-x) - 27px), calc(var(--cursor-y) - 27px), 0) rotate(2deg) scale(0.92);
-  }
-  70% {
-    transform: translate3d(calc(var(--cursor-x) - 27px), calc(var(--cursor-y) - 27px), 0) rotate(0.8deg) scale(1.06);
-  }
-  100% {
-    transform: translate3d(calc(var(--cursor-x) - 27px), calc(var(--cursor-y) - 27px), 0) rotate(0deg) scale(1);
-  }
-}
-
-.reveal-root.is-cursor-suppressed .custom-cursor {
-  opacity: 0;
-}
-
 .hint-icon {
   pointer-events: none;
   position: absolute;
@@ -381,8 +325,7 @@ body {
   }
 }
 
-.reveal-root.is-touch .hint-icon,
-.reveal-root.is-touch .custom-cursor {
+.reveal-root.is-touch .hint-icon {
   display: none;
 }
 
@@ -439,8 +382,7 @@ body {
   .spinner,
   .hint-icon,
   .address-status,
-  .address-submit,
-  .custom-cursor.is-bump {
+  .address-submit {
     animation: none;
     transition: none;
   }
