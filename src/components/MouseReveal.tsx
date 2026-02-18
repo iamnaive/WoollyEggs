@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
 const TOP_IMAGE = "/reveal/top.jpg";
 const UNDER_IMAGE = "/reveal/under.jpg";
+const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
 type Vec2 = { x: number; y: number };
+type CaptureStatus = "idle" | "loading" | "saved" | "error";
 
 function createPlaceholderTexture(colors: [string, string, string]): THREE.Texture {
   const canvas = document.createElement("canvas");
@@ -53,18 +55,72 @@ function loadTextureWithPlaceholder(
   });
 }
 
+function expSmoothing(speed: number, dt: number): number {
+  return 1 - Math.exp(-speed * dt);
+}
+
 export default function MouseReveal(): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
+
   const [useCssFallback, setUseCssFallback] = useState(false);
   const [topLoaded, setTopLoaded] = useState(true);
   const [underLoaded, setUnderLoaded] = useState(true);
 
+  const [address, setAddress] = useState("");
+  const [status, setStatus] = useState<CaptureStatus>("idle");
+  const [statusMessage, setStatusMessage] = useState("");
+
   const cssTargetRef = useRef<Vec2>({ x: 0.5, y: 0.5 });
   const cssCurrentRef = useRef<Vec2>({ x: 0.5, y: 0.5 });
-  const cssRadiusTargetRef = useRef(120);
-  const cssRadiusCurrentRef = useRef(120);
-  const cssPressedRef = useRef(false);
+  const cssRadiusTargetRef = useRef(118);
+  const cssRadiusCurrentRef = useRef(118);
+
+  const activePointerIdRef = useRef<number | null>(null);
+  const pointerTargetPxRef = useRef<Vec2>({ x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 });
+  const prevPointerPxRef = useRef<Vec2>({ x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 });
+  const pointerVelocityRef = useRef(0);
+  const isTouchInputRef = useRef(false);
+  const lastTickRef = useRef(0);
+
+  const handleAddressSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    const trimmed = address.trim();
+    if (!ADDRESS_REGEX.test(trimmed)) {
+      setStatus("error");
+      setStatusMessage("Invalid Monad address");
+      return;
+    }
+
+    try {
+      setStatus("loading");
+      setStatusMessage("");
+
+      const response = await fetch("/api/monad-address", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ address: trimmed })
+      });
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        inserted?: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save address");
+      }
+
+      setStatus("saved");
+      setStatusMessage(data.inserted ? "Saved" : "Already saved");
+    } catch (error) {
+      setStatus("error");
+      setStatusMessage(error instanceof Error ? error.message : "Request failed");
+    }
+  };
 
   useEffect(() => {
     const host = canvasHostRef.current;
@@ -80,10 +136,10 @@ export default function MouseReveal(): JSX.Element {
     };
     reducedMotionQuery.addEventListener("change", onReducedMotionChange);
 
-    const pointerTarget: Vec2 = { x: 0.5, y: 0.5 };
-    const pointerCurrent: Vec2 = { x: 0.5, y: 0.5 };
-    let radiusTarget = 120;
-    let radiusCurrent = 120;
+    const pointerTargetUv: Vec2 = { x: 0.5, y: 0.5 };
+    const pointerCurrentUv: Vec2 = { x: 0.5, y: 0.5 };
+    let radiusTarget = 118;
+    let radiusCurrent = 118;
     let isPressed = false;
 
     const toLocalUv = (clientX: number, clientY: number): Vec2 => {
@@ -96,61 +152,58 @@ export default function MouseReveal(): JSX.Element {
       };
     };
 
-    const onPointerMove = (event: PointerEvent): void => {
-      const uv = toLocalUv(event.clientX, event.clientY);
-      pointerTarget.x = uv.x;
-      pointerTarget.y = uv.y;
-      cssTargetRef.current = uv;
+    const updateVelocity = (clientX: number, clientY: number): void => {
+      const now = performance.now();
+      const dt = Math.max(0.008, Math.min(0.1, (now - (lastTickRef.current || now)) / 1000));
+      const prev = prevPointerPxRef.current;
+      const dx = clientX - prev.x;
+      const dy = clientY - prev.y;
+      const speed = Math.sqrt(dx * dx + dy * dy) / dt;
+      pointerVelocityRef.current = pointerVelocityRef.current * 0.84 + speed * 0.16;
+      prevPointerPxRef.current = { x: clientX, y: clientY };
+      pointerTargetPxRef.current = { x: clientX, y: clientY };
     };
 
-    const onPointerDown = (): void => {
+    const setTargetFromClient = (clientX: number, clientY: number): void => {
+      const uv = toLocalUv(clientX, clientY);
+      pointerTargetUv.x = uv.x;
+      pointerTargetUv.y = uv.y;
+      cssTargetRef.current = uv;
+      updateVelocity(clientX, clientY);
+    };
+
+    const onPointerMove = (event: PointerEvent): void => {
+      if (activePointerIdRef.current !== null && event.pointerId !== activePointerIdRef.current) {
+        return;
+      }
+      setTargetFromClient(event.clientX, event.clientY);
+    };
+
+    const onPointerDown = (event: PointerEvent): void => {
+      activePointerIdRef.current = event.pointerId;
+      isTouchInputRef.current = event.pointerType === "touch";
+      if (isTouchInputRef.current) {
+        root.classList.add("is-touch");
+      } else {
+        root.classList.remove("is-touch");
+      }
+
       isPressed = true;
-      cssPressedRef.current = true;
-      radiusTarget = 180;
-      cssRadiusTargetRef.current = 180;
+      radiusTarget = 178;
+      cssRadiusTargetRef.current = 178;
+      setTargetFromClient(event.clientX, event.clientY);
     };
 
     const onPointerUp = (): void => {
+      activePointerIdRef.current = null;
       isPressed = false;
-      cssPressedRef.current = false;
-      radiusTarget = 120;
-      cssRadiusTargetRef.current = 120;
-    };
-
-    const onTouchStart = (event: TouchEvent): void => {
-      if (!event.touches[0]) {
-        return;
-      }
-      const touch = event.touches[0];
-      const uv = toLocalUv(touch.clientX, touch.clientY);
-      pointerTarget.x = uv.x;
-      pointerTarget.y = uv.y;
-      cssTargetRef.current = uv;
-      onPointerDown();
-    };
-
-    const onTouchMove = (event: TouchEvent): void => {
-      if (!event.touches[0]) {
-        return;
-      }
-      const touch = event.touches[0];
-      const uv = toLocalUv(touch.clientX, touch.clientY);
-      pointerTarget.x = uv.x;
-      pointerTarget.y = uv.y;
-      cssTargetRef.current = uv;
-    };
-
-    const onTouchEnd = (): void => {
-      onPointerUp();
+      radiusTarget = 118;
+      cssRadiusTargetRef.current = 118;
     };
 
     root.addEventListener("pointermove", onPointerMove, { passive: true });
     root.addEventListener("pointerdown", onPointerDown, { passive: true });
     window.addEventListener("pointerup", onPointerUp, { passive: true });
-    root.addEventListener("touchstart", onTouchStart, { passive: true });
-    root.addEventListener("touchmove", onTouchMove, { passive: true });
-    window.addEventListener("touchend", onTouchEnd, { passive: true });
-    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
     let rafId = 0;
     let cssRafId = 0;
@@ -159,21 +212,28 @@ export default function MouseReveal(): JSX.Element {
 
     const startCssFallbackLoop = (): void => {
       const tick = (): void => {
-        const smooth = reducedMotion ? 0.32 : 0.16;
-        cssCurrentRef.current.x += (cssTargetRef.current.x - cssCurrentRef.current.x) * smooth;
-        cssCurrentRef.current.y += (cssTargetRef.current.y - cssCurrentRef.current.y) * smooth;
+        const now = performance.now();
+        const dt = Math.max(0.001, Math.min(0.05, (now - (lastTickRef.current || now)) / 1000));
+        lastTickRef.current = now;
 
-        const radiusSmooth = reducedMotion ? 0.2 : 0.11;
+        const pointerSmooth = expSmoothing(reducedMotion ? 30 : 14, dt);
+        const radiusSmooth = expSmoothing(reducedMotion ? 26 : 10, dt);
+        cssCurrentRef.current.x += (cssTargetRef.current.x - cssCurrentRef.current.x) * pointerSmooth;
+        cssCurrentRef.current.y += (cssTargetRef.current.y - cssCurrentRef.current.y) * pointerSmooth;
         cssRadiusCurrentRef.current +=
           (cssRadiusTargetRef.current - cssRadiusCurrentRef.current) * radiusSmooth;
 
         root.style.setProperty("--mx", `${(cssCurrentRef.current.x * 100).toFixed(3)}%`);
         root.style.setProperty("--my", `${((1 - cssCurrentRef.current.y) * 100).toFixed(3)}%`);
         root.style.setProperty("--reveal-radius", `${cssRadiusCurrentRef.current.toFixed(2)}px`);
-        root.style.setProperty(
-          "--reveal-soft",
-          `${(reducedMotion ? 40 : isPressed ? 64 : 56).toFixed(2)}px`
-        );
+        root.style.setProperty("--reveal-soft", `${(reducedMotion ? 32 : isPressed ? 58 : 46).toFixed(2)}px`);
+
+        const topShiftX = (cssCurrentRef.current.x - 0.5) * 10;
+        const topShiftY = (cssCurrentRef.current.y - 0.5) * 8;
+        root.style.setProperty("--fallback-top-shift-x", `${topShiftX.toFixed(2)}px`);
+        root.style.setProperty("--fallback-top-shift-y", `${topShiftY.toFixed(2)}px`);
+        root.style.setProperty("--fallback-under-shift-x", `${(-topShiftX * 1.25).toFixed(2)}px`);
+        root.style.setProperty("--fallback-under-shift-y", `${(-topShiftY * 1.25).toFixed(2)}px`);
 
         cssRafId = window.requestAnimationFrame(tick);
       };
@@ -195,8 +255,8 @@ export default function MouseReveal(): JSX.Element {
         const scene = new THREE.Scene();
         const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-        const topPlaceholder = createPlaceholderTexture(["#f5f7ff", "#dde6ff", "#bccdf6"]);
-        const underPlaceholder = createPlaceholderTexture(["#fff3dd", "#ffcbb0", "#e6a7d1"]);
+        const topPlaceholder = createPlaceholderTexture(["#f4f7ff", "#dde6ff", "#bdcdf6"]);
+        const underPlaceholder = createPlaceholderTexture(["#fff4df", "#ffd0b0", "#dfafd9"]);
         const loader = new THREE.TextureLoader();
 
         const [topResult, underResult] = await Promise.all([
@@ -226,12 +286,13 @@ export default function MouseReveal(): JSX.Element {
           uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
           uCursor: { value: new THREE.Vector2(0.5, 0.5) },
           uParallax: { value: new THREE.Vector2(0, 0) },
-          uRadius: { value: 120 },
-          uFeather: { value: reducedMotion ? 42 : 56 },
-          uTime: { value: 0 },
-          uReducedMotion: { value: reducedMotion ? 1 : 0 },
-          uAberrationStrength: { value: reducedMotion ? 0 : 3.0 },
-          uGlowStrength: { value: reducedMotion ? 0.035 : 0.07 }
+          uRadius: { value: 118.0 },
+          uFeather: { value: reducedMotion ? 30.0 : 46.0 },
+          uTime: { value: 0.0 },
+          uVelocity: { value: 0.0 },
+          uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 },
+          uAberrationStrength: { value: reducedMotion ? 0.0 : 2.0 },
+          uGlowStrength: { value: reducedMotion ? 0.026 : 0.06 }
         };
 
         const material = new THREE.ShaderMaterial({
@@ -253,6 +314,7 @@ export default function MouseReveal(): JSX.Element {
             uniform float uRadius;
             uniform float uFeather;
             uniform float uTime;
+            uniform float uVelocity;
             uniform float uReducedMotion;
             uniform float uAberrationStrength;
             uniform float uGlowStrength;
@@ -272,8 +334,28 @@ export default function MouseReveal(): JSX.Element {
               return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
             }
 
+            float fbm(vec2 p) {
+              float value = 0.0;
+              float amplitude = 0.5;
+              mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+              for (int i = 0; i < 5; i++) {
+                value += amplitude * noise(p);
+                p = m * p * 0.62 + vec2(17.0, 11.0);
+                amplitude *= 0.52;
+              }
+              return value;
+            }
+
             vec2 clampUv(vec2 uv) {
               return clamp(uv, vec2(0.0), vec2(1.0));
+            }
+
+            vec3 tinyBlur(sampler2D tex, vec2 uv, vec2 px) {
+              vec3 c0 = texture2D(tex, clampUv(uv + vec2(px.x, 0.0))).rgb;
+              vec3 c1 = texture2D(tex, clampUv(uv - vec2(px.x, 0.0))).rgb;
+              vec3 c2 = texture2D(tex, clampUv(uv + vec2(0.0, px.y))).rgb;
+              vec3 c3 = texture2D(tex, clampUv(uv - vec2(0.0, px.y))).rgb;
+              return (c0 + c1 + c2 + c3) * 0.25;
             }
 
             void main() {
@@ -283,48 +365,59 @@ export default function MouseReveal(): JSX.Element {
               vec2 fragPx = uv * uResolution;
               vec2 fromCursor = fragPx - cursorPx;
               float distPx = length(fromCursor);
+              float angle = atan(fromCursor.y, fromCursor.x);
 
-              float n = noise(uv * 8.0 + vec2(uTime * 0.35, -uTime * 0.25));
-              float noiseAmp = mix(0.0, 9.0, 1.0 - uReducedMotion);
-              float distortedRadius = uRadius + (n - 0.5) * noiseAmp;
-              float mask = 1.0 - smoothstep(
-                distortedRadius - uFeather,
-                distortedRadius + uFeather,
-                distPx
-              );
+              float motion = 1.0 - uReducedMotion;
+              float organic = fbm(vec2(cos(angle), sin(angle)) * 2.4 + uv * 2.7 + vec2(uTime * 0.12, -uTime * 0.09));
+              float micro = sin(angle * 4.0 + uTime * 1.2) * 1.15 + sin(angle * 7.0 - uTime * 0.9) * 0.7;
+              float ripple = sin(distPx * 0.077 - uTime * 9.5) * clamp(uVelocity * 0.0035, 0.0, 2.4);
+              float radiusDistorted = uRadius + (organic - 0.5) * 15.0 * motion + micro * motion + ripple * motion;
 
-              float edgeInner = smoothstep(distortedRadius - uFeather * 1.2, distortedRadius, distPx);
-              float edgeOuter = smoothstep(distortedRadius, distortedRadius + uFeather * 1.2, distPx);
-              float edgeBand = clamp(edgeInner - edgeOuter, 0.0, 1.0);
+              float mask = 1.0 - smoothstep(radiusDistorted - uFeather, radiusDistorted + uFeather, distPx);
+              float edgeIn = smoothstep(radiusDistorted - uFeather * 0.95, radiusDistorted, distPx);
+              float edgeOut = smoothstep(radiusDistorted, radiusDistorted + uFeather * 0.95, distPx);
+              float edgeBand = clamp(edgeIn - edgeOut, 0.0, 1.0);
+              float innerBand = smoothstep(radiusDistorted - uFeather * 1.55, radiusDistorted - uFeather * 0.45, distPx) * (1.0 - edgeBand);
 
               vec2 topUv = clampUv(uv + uParallax * pxToUv);
-              vec2 underUv = clampUv(uv - uParallax * pxToUv * 1.2);
-              vec4 topColor = texture2D(uTop, topUv);
-              vec4 underColor = texture2D(uUnder, underUv);
-              vec4 mixed = mix(topColor, underColor, mask);
+              vec2 underUv = clampUv(uv - uParallax * pxToUv * 1.24);
 
-              vec2 direction = normalize(fromCursor + vec2(0.0001));
-              float aberr = uAberrationStrength * edgeBand * (1.0 - uReducedMotion);
+              vec2 dir = normalize(fromCursor + vec2(0.0001));
+              float refr = innerBand * (0.75 + edgeBand * 0.95) * motion * 3.0;
+              vec2 refrOffset = dir * refr * pxToUv;
+              vec2 topLensUv = clampUv(topUv + refrOffset * 0.32);
+              vec2 underLensUv = clampUv(underUv + refrOffset);
+
+              vec4 topColor = texture2D(uTop, topLensUv);
+              vec4 underColor = texture2D(uUnder, underLensUv);
+              vec4 composed = mix(topColor, underColor, mask);
+
+              vec3 topEdgeBlur = tinyBlur(uTop, topLensUv, pxToUv * 1.5);
+              vec3 underEdgeBlur = tinyBlur(uUnder, underLensUv, pxToUv * 1.5);
+              vec3 edgeBlur = mix(topEdgeBlur, underEdgeBlur, mask);
+              composed.rgb = mix(composed.rgb, edgeBlur, edgeBand * 0.18);
+
+              float aberr = uAberrationStrength * edgeBand * motion;
               vec3 split;
-              split.r = texture2D(uUnder, clampUv(underUv + direction * aberr * pxToUv)).r;
-              split.g = texture2D(uUnder, underUv).g;
-              split.b = texture2D(uUnder, clampUv(underUv - direction * aberr * pxToUv)).b;
-              mixed.rgb = mix(mixed.rgb, split, edgeBand * 0.35 * (1.0 - uReducedMotion));
+              split.r = texture2D(uUnder, clampUv(underLensUv + dir * aberr * pxToUv)).r;
+              split.g = texture2D(uUnder, underLensUv).g;
+              split.b = texture2D(uUnder, clampUv(underLensUv - dir * aberr * pxToUv)).b;
+              composed.rgb = mix(composed.rgb, split, edgeBand * 0.34 * motion);
 
-              float glow = edgeBand * uGlowStrength;
-              mixed.rgb += vec3(0.84, 0.92, 1.0) * glow;
+              float velGlow = clamp(uVelocity * 0.0022, 0.0, 1.2);
+              float glow = edgeBand * (uGlowStrength + velGlow * 0.035) * (1.0 - uReducedMotion * 0.7);
+              composed.rgb += vec3(0.9, 0.95, 1.0) * glow;
 
-              float vignette = smoothstep(0.22, 0.92, length(uv - 0.5));
-              mixed.rgb *= 1.0 - vignette * 0.15;
+              float depthVignette = smoothstep(0.28, 0.95, length(uv - 0.5));
+              composed.rgb *= 1.0 - depthVignette * 0.11;
 
-              gl_FragColor = mixed;
+              gl_FragColor = vec4(composed.rgb, 1.0);
             }
           `
         });
 
         const geometry = new THREE.PlaneGeometry(2, 2);
-        const mesh = new THREE.Mesh(geometry, material);
-        scene.add(mesh);
+        scene.add(new THREE.Mesh(geometry, material));
 
         const onResize = (): void => {
           const width = window.innerWidth;
@@ -337,24 +430,30 @@ export default function MouseReveal(): JSX.Element {
         window.addEventListener("resize", onResize, { passive: true });
 
         const animate = (): void => {
-          const pointerSmooth = reducedMotion ? 0.28 : 0.14;
-          const radiusSmooth = reducedMotion ? 0.22 : 0.1;
+          const now = performance.now();
+          const dt = Math.max(0.001, Math.min(0.05, (now - (lastTickRef.current || now)) / 1000));
+          lastTickRef.current = now;
 
-          pointerCurrent.x += (pointerTarget.x - pointerCurrent.x) * pointerSmooth;
-          pointerCurrent.y += (pointerTarget.y - pointerCurrent.y) * pointerSmooth;
+          const pointerSmooth = expSmoothing(reducedMotion ? 34 : 14.5, dt);
+          const radiusSmooth = expSmoothing(reducedMotion ? 28 : 10, dt);
+
+          pointerCurrentUv.x += (pointerTargetUv.x - pointerCurrentUv.x) * pointerSmooth;
+          pointerCurrentUv.y += (pointerTargetUv.y - pointerCurrentUv.y) * pointerSmooth;
           radiusCurrent += (radiusTarget - radiusCurrent) * radiusSmooth;
 
-          const pxShiftX = (pointerCurrent.x - 0.5) * 18;
-          const pxShiftY = (pointerCurrent.y - 0.5) * 14;
+          const parallaxX = (pointerCurrentUv.x - 0.5) * 18;
+          const parallaxY = (pointerCurrentUv.y - 0.5) * 14;
+          const velocity = Math.min(pointerVelocityRef.current, 1600);
 
-          uniforms.uCursor.value.set(pointerCurrent.x, pointerCurrent.y);
+          uniforms.uCursor.value.set(pointerCurrentUv.x, pointerCurrentUv.y);
           uniforms.uRadius.value = radiusCurrent;
-          uniforms.uParallax.value.set(pxShiftX, pxShiftY);
-          uniforms.uTime.value += reducedMotion ? 0 : 0.012;
-          uniforms.uFeather.value = reducedMotion ? 40 : isPressed ? 62 : 55;
+          uniforms.uParallax.value.set(parallaxX, parallaxY);
+          uniforms.uVelocity.value += (velocity - uniforms.uVelocity.value) * expSmoothing(11, dt);
+          uniforms.uTime.value += reducedMotion ? 0 : dt;
+          uniforms.uFeather.value = reducedMotion ? 30 : isPressed ? 57 : 46;
           uniforms.uReducedMotion.value = reducedMotion ? 1 : 0;
-          uniforms.uAberrationStrength.value = reducedMotion ? 0 : 3.0;
-          uniforms.uGlowStrength.value = reducedMotion ? 0.035 : 0.07;
+          uniforms.uAberrationStrength.value = reducedMotion ? 0 : 2.0;
+          uniforms.uGlowStrength.value = reducedMotion ? 0.026 : 0.06;
 
           renderer.render(scene, camera);
           rafId = window.requestAnimationFrame(animate);
@@ -391,10 +490,6 @@ export default function MouseReveal(): JSX.Element {
       root.removeEventListener("pointermove", onPointerMove);
       root.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerup", onPointerUp);
-      root.removeEventListener("touchstart", onTouchStart);
-      root.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("touchend", onTouchEnd);
-      window.removeEventListener("touchcancel", onTouchEnd);
       window.cancelAnimationFrame(cssRafId);
       if (cleanupWebGL) {
         cleanupWebGL();
@@ -404,10 +499,10 @@ export default function MouseReveal(): JSX.Element {
 
   const topBackground = topLoaded
     ? `url("${TOP_IMAGE}")`
-    : "linear-gradient(135deg, #eaf0ff 0%, #d8e2ff 45%, #bdcef9 100%)";
+    : "linear-gradient(135deg, #f2f6ff 0%, #dee8ff 48%, #c4d1f5 100%)";
   const underBackground = underLoaded
     ? `url("${UNDER_IMAGE}")`
-    : "linear-gradient(135deg, #fff3dd 0%, #ffc8ab 48%, #d8a8d8 100%)";
+    : "linear-gradient(135deg, #fff3df 0%, #ffd1b2 50%, #dfb4dd 100%)";
 
   return (
     <section
@@ -431,6 +526,42 @@ export default function MouseReveal(): JSX.Element {
 
       <div className="vignette-overlay" aria-hidden />
       <div className="grain-overlay" aria-hidden />
+
+      <form className="address-bar" onSubmit={handleAddressSubmit} noValidate>
+        <label htmlFor="monad-address" className="sr-only">
+          Monad EVM address
+        </label>
+        <input
+          id="monad-address"
+          className="address-input"
+          type="text"
+          inputMode="text"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="0x... Monad address"
+          value={address}
+          onChange={(event) => {
+            setAddress(event.target.value);
+            if (status !== "idle") {
+              setStatus("idle");
+              setStatusMessage("");
+            }
+          }}
+          aria-invalid={status === "error"}
+        />
+        <button
+          type="submit"
+          className="address-submit"
+          aria-label="Submit Monad address"
+          disabled={status === "loading"}
+        >
+          {status === "loading" ? <span className="spinner" aria-hidden /> : <span aria-hidden>↗</span>}
+        </button>
+        <div className={`address-status is-${status}`} aria-live="polite">
+          {statusMessage}
+        </div>
+      </form>
+
       <div className="hint-icon" aria-hidden>
         <svg viewBox="0 0 24 24" fill="none" role="img" aria-label="cursor hint icon">
           <path
