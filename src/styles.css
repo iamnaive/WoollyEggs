@@ -119,38 +119,15 @@ body {
 }
 
 .css-fallback-rim {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(
-      circle at var(--mx) var(--my),
-      #ffffff00 calc(var(--reveal-radius) - 8px),
-      #e8f0ff99 calc(var(--reveal-radius) + 2px),
-      #ffffff00 calc(var(--reveal-radius) + var(--reveal-soft) + 10px)
-    );
-  filter: blur(7px);
-  opacity: calc(0.25 + var(--rim-intensity) * 0.45);
+  display: none;
 }
 
 .vignette-overlay {
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background: radial-gradient(circle at center, #ffffff00 43%, #0000001f 100%);
-  mix-blend-mode: multiply;
+  display: none;
 }
 
 .grain-overlay {
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  opacity: 0.08;
-  mix-blend-mode: soft-light;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23n)' opacity='0.24'/%3E%3C/svg%3E");
-  background-size: 260px 260px;
-  animation: grain-shift 2.1s steps(2) infinite;
+  display: none;
 }
 
 @keyframes grain-shift {
@@ -171,26 +148,26 @@ body {
   }
 }
 
-.top-layer-mask {
+.under-layer-mask {
   position: absolute;
   inset: 0;
   z-index: 5;
   pointer-events: none;
   mask-image: radial-gradient(
     circle at var(--mx) var(--my),
-    transparent 0,
-    transparent var(--reveal-radius),
-    #ffffff calc(var(--reveal-radius) + var(--reveal-soft))
+    #ffffff 0,
+    #ffffff var(--reveal-radius),
+    transparent calc(var(--reveal-radius) + var(--reveal-soft))
   );
   -webkit-mask-image: radial-gradient(
     circle at var(--mx) var(--my),
-    transparent 0,
-    transparent var(--reveal-radius),
-    #ffffff calc(var(--reveal-radius) + var(--reveal-soft))
+    #ffffff 0,
+    #ffffff var(--reveal-radius),
+    transparent calc(var(--reveal-radius) + var(--reveal-soft))
   );
 }
 
-.top-layer-mask .address-bar {
+.under-layer-mask .address-bar {
   pointer-events: auto;
   position: absolute;
   left: 50%;

@@ -1,10 +1,5 @@
 import { CSSProperties, FormEvent, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader.js";
 
 const TOP_IMAGE = "/reveal/top.avif";
 const UNDER_IMAGE = "/reveal/under.avif";
@@ -190,7 +185,6 @@ export default function MouseReveal(): JSX.Element {
     const pointerPixelTarget: Vec2 = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
 
     const cursorVelocityPx: Vec2 = { x: 0, y: 0 };
-    let pointerSpeed = 0;
     let radiusBase = 118;
     let radiusCurrent = 118;
     let radiusVelocity = 0;
@@ -223,7 +217,7 @@ export default function MouseReveal(): JSX.Element {
         return;
       }
       const target = event.target as HTMLElement | null;
-      const nextSuppressed = Boolean(target?.closest(".top-layer-mask"));
+      const nextSuppressed = Boolean(target?.closest(".under-layer-mask"));
       if (nextSuppressed !== cursorSuppressedRef.current) {
         cursorSuppressedRef.current = nextSuppressed;
         setCursorSuppressed(nextSuppressed);
@@ -246,7 +240,7 @@ export default function MouseReveal(): JSX.Element {
       pulseVelocity += 880;
 
       const target = event.target as HTMLElement | null;
-      if (!onTouch && !target?.closest(".top-layer-mask")) {
+      if (!onTouch && !target?.closest(".under-layer-mask")) {
         setCursorOpen((value) => !value);
         if (!reducedMotion) {
           setCursorBump(false);
@@ -304,11 +298,6 @@ export default function MouseReveal(): JSX.Element {
         pointerPixelCurrent.x += cursorVelocityPx.x * dt;
         pointerPixelCurrent.y += cursorVelocityPx.y * dt;
 
-        pointerSpeed = Math.min(
-          Math.hypot(pointerVelocityUv.x * window.innerWidth, pointerVelocityUv.y * window.innerHeight),
-          2200
-        );
-
         root.style.setProperty("--mx", `${(pointerCurrentUv.x * 100).toFixed(3)}%`);
         root.style.setProperty("--my", `${((1 - pointerCurrentUv.y) * 100).toFixed(3)}%`);
         root.style.setProperty("--cursor-x", `${pointerPixelCurrent.x.toFixed(2)}px`);
@@ -325,7 +314,7 @@ export default function MouseReveal(): JSX.Element {
           "--fallback-under-shift-y",
           `${((-pointerCurrentUv.y + 0.5) * 8).toFixed(2)}px`
         );
-        root.style.setProperty("--rim-intensity", `${(0.25 + pointerSpeed / 4200).toFixed(3)}`);
+        root.style.setProperty("--rim-intensity", "0");
 
         cssRafId = window.requestAnimationFrame(tick);
       };
@@ -348,20 +337,6 @@ export default function MouseReveal(): JSX.Element {
 
         const scene = new THREE.Scene();
         const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        const composer = new EffectComposer(renderer);
-        const renderPass = new RenderPass(scene, camera);
-        composer.addPass(renderPass);
-
-        const bloomPass = new UnrealBloomPass(
-          new THREE.Vector2(window.innerWidth, window.innerHeight),
-          reducedMotion ? 0 : 0.22,
-          0.55,
-          0.72
-        );
-        composer.addPass(bloomPass);
-
-        const fxaaPass = new ShaderPass(FXAAShader);
-        composer.addPass(fxaaPass);
 
         const topPlaceholder = createPlaceholderTexture(["#f4f7ff", "#dde6ff", "#bdcdf6"]);
         const underPlaceholder = createPlaceholderTexture(["#fff4df", "#ffd0b0", "#dfafd9"]);
@@ -381,7 +356,6 @@ export default function MouseReveal(): JSX.Element {
           if (underResult.texture !== underPlaceholder) {
             underPlaceholder.dispose();
           }
-          composer.dispose();
           renderer.dispose();
           return;
         }
@@ -398,9 +372,7 @@ export default function MouseReveal(): JSX.Element {
           uRadius: { value: 118.0 },
           uFeather: { value: reducedMotion ? 30.0 : 46.0 },
           uTime: { value: 0.0 },
-          uVelocity: { value: 0.0 },
-          uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 },
-          uRimBoost: { value: 0.25 }
+          uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 }
         };
 
         const material = new THREE.ShaderMaterial({
@@ -422,9 +394,7 @@ export default function MouseReveal(): JSX.Element {
             uniform float uRadius;
             uniform float uFeather;
             uniform float uTime;
-            uniform float uVelocity;
             uniform float uReducedMotion;
-            uniform float uRimBoost;
 
             float hash(vec2 p) {
               return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -457,14 +427,6 @@ export default function MouseReveal(): JSX.Element {
               return clamp(uv, vec2(0.0), vec2(1.0));
             }
 
-            vec3 tinyBlur(sampler2D tex, vec2 uv, vec2 px) {
-              vec3 c0 = texture2D(tex, clampUv(uv + vec2(px.x, 0.0))).rgb;
-              vec3 c1 = texture2D(tex, clampUv(uv - vec2(px.x, 0.0))).rgb;
-              vec3 c2 = texture2D(tex, clampUv(uv + vec2(0.0, px.y))).rgb;
-              vec3 c3 = texture2D(tex, clampUv(uv - vec2(0.0, px.y))).rgb;
-              return (c0 + c1 + c2 + c3) * 0.25;
-            }
-
             void main() {
               vec2 uv = vUv;
               vec2 pxToUv = 1.0 / uResolution;
@@ -477,50 +439,15 @@ export default function MouseReveal(): JSX.Element {
               float motion = 1.0 - uReducedMotion;
               float organic = fbm(vec2(cos(angle), sin(angle)) * 2.35 + uv * 2.65 + vec2(uTime * 0.12, -uTime * 0.09));
               float micro = sin(angle * 4.0 + uTime * 1.2) * 1.05 + sin(angle * 6.8 - uTime * 0.92) * 0.68;
-              float ripple = sin(distPx * 0.079 - uTime * 9.2) * clamp(uVelocity * 0.0034, 0.0, 2.35);
-              float radiusDistorted = uRadius + (organic - 0.5) * 14.0 * motion + micro * motion + ripple * motion;
+              float radiusDistorted = uRadius + (organic - 0.5) * 14.0 * motion + micro * motion;
 
               float mask = 1.0 - smoothstep(radiusDistorted - uFeather, radiusDistorted + uFeather, distPx);
-              float edgeIn = smoothstep(radiusDistorted - uFeather * 0.93, radiusDistorted, distPx);
-              float edgeOut = smoothstep(radiusDistorted, radiusDistorted + uFeather * 0.93, distPx);
-              float edgeBand = clamp(edgeIn - edgeOut, 0.0, 1.0);
-              float innerBand = smoothstep(radiusDistorted - uFeather * 1.55, radiusDistorted - uFeather * 0.44, distPx) * (1.0 - edgeBand);
 
               vec2 topUv = clampUv(uv + uParallax * pxToUv);
               vec2 underUv = clampUv(uv - uParallax * pxToUv * 1.24);
-
-              vec2 dir = normalize(fromCursor + vec2(0.0001));
-              float refr = innerBand * (0.75 + edgeBand * 0.98) * motion * 3.1;
-              vec2 refrOffset = dir * refr * pxToUv;
-              vec2 topLensUv = clampUv(topUv + refrOffset * 0.35);
-              vec2 underLensUv = clampUv(underUv + refrOffset);
-
-              vec4 topColor = texture2D(uTop, topLensUv);
-              vec4 underColor = texture2D(uUnder, underLensUv);
+              vec4 topColor = texture2D(uTop, topUv);
+              vec4 underColor = texture2D(uUnder, underUv);
               vec4 composed = mix(topColor, underColor, mask);
-
-              vec3 topEdgeBlur = tinyBlur(uTop, topLensUv, pxToUv * 1.4);
-              vec3 underEdgeBlur = tinyBlur(uUnder, underLensUv, pxToUv * 1.4);
-              vec3 edgeBlur = mix(topEdgeBlur, underEdgeBlur, mask);
-              composed.rgb = mix(composed.rgb, edgeBlur, edgeBand * 0.18);
-
-              float aberr = 1.95 * edgeBand * motion;
-              vec3 split;
-              split.r = texture2D(uUnder, clampUv(underLensUv + dir * aberr * pxToUv)).r;
-              split.g = texture2D(uUnder, underLensUv).g;
-              split.b = texture2D(uUnder, clampUv(underLensUv - dir * aberr * pxToUv)).b;
-              composed.rgb = mix(composed.rgb, split, edgeBand * 0.3 * motion);
-
-              float rim = edgeBand * (0.42 + uRimBoost) * (1.0 - uReducedMotion * 0.65);
-              vec3 rimColor = vec3(1.25, 1.31, 1.44) * rim;
-              composed.rgb += rimColor;
-
-              float glow = edgeBand * (0.055 + clamp(uVelocity * 0.00002, 0.0, 0.03)) * (1.0 - uReducedMotion * 0.65);
-              composed.rgb += vec3(0.85, 0.93, 1.0) * glow;
-
-              float depthVignette = smoothstep(0.28, 0.95, length(uv - 0.5));
-              composed.rgb *= 1.0 - depthVignette * 0.11;
-
               gl_FragColor = vec4(composed.rgb, 1.0);
             }
           `
@@ -535,11 +462,7 @@ export default function MouseReveal(): JSX.Element {
           const dpr = Math.min(window.devicePixelRatio || 1, 2);
           renderer.setPixelRatio(dpr);
           renderer.setSize(width, height, false);
-          composer.setSize(width, height);
-          composer.setPixelRatio(dpr);
           uniforms.uResolution.value.set(width, height);
-          bloomPass.setSize(width, height);
-          fxaaPass.material.uniforms.resolution.value.set(1 / (width * dpr), 1 / (height * dpr));
         };
         onResize();
         window.addEventListener("resize", onResize, { passive: true });
@@ -573,21 +496,12 @@ export default function MouseReveal(): JSX.Element {
           pointerPixelCurrent.x += cursorVelocityPx.x * dt;
           pointerPixelCurrent.y += cursorVelocityPx.y * dt;
 
-          pointerSpeed = Math.min(
-            Math.hypot(pointerVelocityUv.x * window.innerWidth, pointerVelocityUv.y * window.innerHeight),
-            2200
-          );
-
           uniforms.uCursor.value.set(pointerCurrentUv.x, pointerCurrentUv.y);
           uniforms.uRadius.value = radiusCurrent;
           uniforms.uParallax.value.set((pointerCurrentUv.x - 0.5) * 17, (pointerCurrentUv.y - 0.5) * 13);
-          uniforms.uVelocity.value += (pointerSpeed - uniforms.uVelocity.value) * (1 - Math.exp(-10 * dt));
           uniforms.uTime.value += reducedMotion ? 0 : dt;
           uniforms.uFeather.value = reducedMotion ? 32 : pressed ? 56 : 46;
           uniforms.uReducedMotion.value = reducedMotion ? 1 : 0;
-          uniforms.uRimBoost.value = 0.25 + Math.min(pointerSpeed / 4000, 0.35);
-
-          bloomPass.strength = reducedMotion ? 0 : 0.22;
 
           root.style.setProperty("--mx", `${(pointerCurrentUv.x * 100).toFixed(3)}%`);
           root.style.setProperty("--my", `${((1 - pointerCurrentUv.y) * 100).toFixed(3)}%`);
@@ -605,9 +519,8 @@ export default function MouseReveal(): JSX.Element {
             "--fallback-under-shift-y",
             `${((-pointerCurrentUv.y + 0.5) * 8).toFixed(2)}px`
           );
-          root.style.setProperty("--rim-intensity", `${(0.25 + pointerSpeed / 4200).toFixed(3)}`);
-
-          composer.render();
+          root.style.setProperty("--rim-intensity", "0");
+          renderer.render(scene, camera);
           rafId = window.requestAnimationFrame(animate);
         };
         animate();
@@ -625,7 +538,6 @@ export default function MouseReveal(): JSX.Element {
           if (underResult.texture !== underPlaceholder) {
             underPlaceholder.dispose();
           }
-          composer.dispose();
           renderer.dispose();
           renderer.domElement.remove();
         };
@@ -685,7 +597,7 @@ export default function MouseReveal(): JSX.Element {
       <div className="vignette-overlay" aria-hidden />
       <div className="grain-overlay" aria-hidden />
 
-      <div className="top-layer-mask">
+      <div className="under-layer-mask">
         <form className="address-bar" onSubmit={handleAddressSubmit} noValidate>
           <div className="address-meta">
             <span className="address-label">Monad address</span>
