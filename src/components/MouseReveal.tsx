@@ -78,7 +78,7 @@ export default function MouseReveal(): JSX.Element {
     const trimmed = address.trim();
     if (!ADDRESS_REGEX.test(trimmed)) {
       setStatus("error");
-      setStatusMessage("Error");
+      setStatusMessage("Invalid address");
       return;
     }
 
@@ -91,17 +91,33 @@ export default function MouseReveal(): JSX.Element {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: trimmed })
       });
-      const data = (await response.json()) as { ok?: boolean; inserted?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; verified?: boolean; inserted?: boolean; error?: string };
 
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "Request failed");
       }
 
-      setStatus("saved");
-      setStatusMessage(data.inserted ? "Saved" : "Already saved");
+      if (data.verified) {
+        setStatus("saved");
+        setStatusMessage("Your address is verified");
+        try {
+          const key = "we_verified_addresses";
+          const existing = JSON.parse(localStorage.getItem(key) || "[]") as string[];
+          const normalized = trimmed.toLowerCase();
+          if (!existing.includes(normalized)) {
+            existing.push(normalized);
+            localStorage.setItem(key, JSON.stringify(existing));
+          }
+        } catch {
+          // ignore localStorage issues
+        }
+      } else {
+        setStatus("error");
+        setStatusMessage("Address not verified");
+      }
     } catch {
       setStatus("error");
-      setStatusMessage("Error");
+      setStatusMessage("Request failed");
     }
   };
 
@@ -114,187 +130,81 @@ export default function MouseReveal(): JSX.Element {
 
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reducedMotion = reducedMotionQuery.matches;
+
     const onReducedMotionChange = (event: MediaQueryListEvent): void => {
       reducedMotion = event.matches;
     };
-    reducedMotionQuery.addEventListener("change", onReducedMotionChange);
 
-    const pointerTargetUv: Vec2 = { x: 0.5, y: 0.5 };
-    const pointerCurrentUv: Vec2 = { x: 0.5, y: 0.5 };
-    const pointerVelocityUv: Vec2 = { x: 0, y: 0 };
-    let radiusBase = 118;
-    let radiusCurrent = 118;
-    let radiusVelocity = 0;
-    let pulse = 0;
-    let pulseVelocity = 0;
-    let pressed = false;
-    let onTouch = false;
-    let activePointerId: number | null = null;
+    reducedMotionQuery.addEventListener?.("change", onReducedMotionChange);
 
-    const toLocalUv = (clientX: number, clientY: number): Vec2 => {
-      const rect = root.getBoundingClientRect();
-      const x = (clientX - rect.left) / rect.width;
-      const y = (clientY - rect.top) / rect.height;
-      return {
-        x: Math.min(1, Math.max(0, x)),
-        y: 1 - Math.min(1, Math.max(0, y))
-      };
-    };
-
-    const trackPointer = (clientX: number, clientY: number): void => {
-      const uv = toLocalUv(clientX, clientY);
-      pointerTargetUv.x = uv.x;
-      pointerTargetUv.y = uv.y;
-    };
-
-    const onPointerMove = (event: PointerEvent): void => {
-      if (activePointerId !== null && event.pointerId !== activePointerId) {
-        return;
-      }
-      trackPointer(event.clientX, event.clientY);
-    };
-
-    const onPointerDown = (event: PointerEvent): void => {
-      activePointerId = event.pointerId;
-      onTouch = event.pointerType === "touch";
-      if (onTouch) {
-        root.classList.add("is-touch");
-      } else {
-        root.classList.remove("is-touch");
-      }
-
-      trackPointer(event.clientX, event.clientY);
-      pressed = true;
-      radiusBase = 130;
-      pulseVelocity += 880;
-
-    };
-
-    const onPointerUp = (): void => {
-      activePointerId = null;
-      pressed = false;
-      radiusBase = 118;
-    };
-
-    root.addEventListener("pointermove", onPointerMove, { passive: true });
-    root.addEventListener("pointerdown", onPointerDown, { passive: true });
-    window.addEventListener("pointerup", onPointerUp, { passive: true });
-
-    let rafId = 0;
-    let cssRafId = 0;
-    let cleanupWebGL: (() => void) | null = null;
-    let cancelled = false;
-    let previous = performance.now();
-
-    const startCssFallbackLoop = (): void => {
-      const tick = (): void => {
-        const now = performance.now();
-        const dt = Math.max(0.001, Math.min(0.05, (now - previous) / 1000));
-        previous = now;
-
-        const stiffness = reducedMotion ? 180 : 130;
-        const damping = reducedMotion ? 24 : 18;
-        pointerVelocityUv.x += (pointerTargetUv.x - pointerCurrentUv.x) * stiffness * dt;
-        pointerVelocityUv.y += (pointerTargetUv.y - pointerCurrentUv.y) * stiffness * dt;
-        pointerVelocityUv.x *= Math.exp(-damping * dt);
-        pointerVelocityUv.y *= Math.exp(-damping * dt);
-        pointerCurrentUv.x += pointerVelocityUv.x * dt;
-        pointerCurrentUv.y += pointerVelocityUv.y * dt;
-
-        const radiusStiffness = reducedMotion ? 180 : 110;
-        const radiusDamping = reducedMotion ? 26 : 16;
-        pulseVelocity += (-pulse * 90 - pulseVelocity * 18) * dt;
-        pulse += pulseVelocity * dt;
-        const pulseAdd = reducedMotion ? 0 : Math.max(0, pulse);
-        const targetRadius = radiusBase + pulseAdd;
-        radiusVelocity += (targetRadius - radiusCurrent) * radiusStiffness * dt;
-        radiusVelocity *= Math.exp(-radiusDamping * dt);
-        radiusCurrent += radiusVelocity * dt;
-
-        root.style.setProperty("--mx", `${(pointerCurrentUv.x * 100).toFixed(3)}%`);
-        root.style.setProperty("--my", `${((1 - pointerCurrentUv.y) * 100).toFixed(3)}%`);
-        root.style.setProperty("--reveal-radius", `${radiusCurrent.toFixed(2)}px`);
-        root.style.setProperty("--reveal-soft", `${(reducedMotion ? 34 : pressed ? 56 : 46).toFixed(2)}px`);
-        root.style.setProperty("--fallback-top-shift-x", `${((pointerCurrentUv.x - 0.5) * 8).toFixed(2)}px`);
-        root.style.setProperty("--fallback-top-shift-y", `${((pointerCurrentUv.y - 0.5) * 6).toFixed(2)}px`);
-        root.style.setProperty(
-          "--fallback-under-shift-x",
-          `${((-pointerCurrentUv.x + 0.5) * 10).toFixed(2)}px`
-        );
-        root.style.setProperty(
-          "--fallback-under-shift-y",
-          `${((-pointerCurrentUv.y + 0.5) * 8).toFixed(2)}px`
-        );
-
-        cssRafId = window.requestAnimationFrame(tick);
-      };
-      tick();
-    };
-
-    const initWebGL = async (): Promise<void> => {
+    const supportsWebgl = (() => {
       try {
-        const renderer = new THREE.WebGLRenderer({
-          antialias: true,
-          alpha: false,
-          powerPreference: "high-performance"
-        });
-        renderer.setClearColor(0xffffff, 1);
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        host.appendChild(renderer.domElement);
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("webgl", { antialias: true }) || canvas.getContext("experimental-webgl");
+        return Boolean(context);
+      } catch {
+        return false;
+      }
+    })();
 
-        const scene = new THREE.Scene();
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    if (!supportsWebgl) {
+      setUseCssFallback(true);
+      return;
+    }
 
-        const topPlaceholder = createPlaceholderTexture(["#f4f7ff", "#dde6ff", "#bdcdf6"]);
-        const underPlaceholder = createPlaceholderTexture(["#fff4df", "#ffd0b0", "#dfafd9"]);
-        const loader = new THREE.TextureLoader();
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+    renderer.setClearColor(0xffffff, 1);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-        const [topResult, underResult] = await Promise.all([
-          loadTextureWithPlaceholder(loader, TOP_IMAGE, topPlaceholder),
-          loadTextureWithPlaceholder(loader, UNDER_IMAGE, underPlaceholder)
-        ]);
+    // IMPORTANT: disable filmic tone mapping to avoid contrast/effect changes on images
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.toneMappingExposure = 1;
 
-        if (cancelled) {
-          topResult.texture.dispose();
-          underResult.texture.dispose();
-          if (topResult.texture !== topPlaceholder) {
-            topPlaceholder.dispose();
-          }
-          if (underResult.texture !== underPlaceholder) {
-            underPlaceholder.dispose();
-          }
-          renderer.dispose();
-          return;
-        }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    host.appendChild(renderer.domElement);
 
-        setTopLoaded(topResult.loaded);
-        setUnderLoaded(underResult.loaded);
+    const scene = new THREE.Scene();
 
-        const uniforms = {
-          uTop: { value: topResult.texture },
-          uUnder: { value: underResult.texture },
-          uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-          uCursor: { value: new THREE.Vector2(0.5, 0.5) },
-          uParallax: { value: new THREE.Vector2(0, 0) },
-          uRadius: { value: 118.0 },
-          uFeather: { value: reducedMotion ? 30.0 : 46.0 },
-          uTime: { value: 0.0 },
-          uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 }
-        };
+    const placeholderTop = createPlaceholderTexture(["#f4f7ff", "#dde7ff", "#bfcef7"]);
+    const placeholderUnder = createPlaceholderTexture(["#fff4df", "#ffd0ae", "#e0b1dd"]);
 
-        const material = new THREE.ShaderMaterial({
-          uniforms,
-          vertexShader: `
+    const loader = new THREE.TextureLoader();
+    let destroyed = false;
+
+    const uniforms = {
+      uTop: { value: placeholderTop },
+      uUnder: { value: placeholderUnder },
+      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      uCursor: { value: new THREE.Vector2(0.5, 0.5) },
+      uParallax: { value: new THREE.Vector2(0.0, 0.0) },
+      uRadius: { value: 0.18 },
+      uFeather: { value: 0.08 },
+      uTime: { value: 0.0 },
+      uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 }
+    };
+
+    loadTextureWithPlaceholder(loader, TOP_IMAGE, placeholderTop).then(({ texture, loaded }) => {
+      if (destroyed) return;
+      uniforms.uTop.value = texture;
+      setTopLoaded(loaded);
+    });
+
+    loadTextureWithPlaceholder(loader, UNDER_IMAGE, placeholderUnder).then(({ texture, loaded }) => {
+      if (destroyed) return;
+      uniforms.uUnder.value = texture;
+      setUnderLoaded(loaded);
+    });
+
+    const material = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: `
             varying vec2 vUv;
             void main() {
               vUv = uv;
               gl_Position = vec4(position, 1.0);
             }
           `,
-          fragmentShader: `
+      fragmentShader: `
             varying vec2 vUv;
             uniform sampler2D uTop;
             uniform sampler2D uUnder;
@@ -334,25 +244,30 @@ export default function MouseReveal(): JSX.Element {
             }
 
             vec2 clampUv(vec2 uv) {
-              return clamp(uv, vec2(0.0), vec2(1.0));
+              return clamp(uv, vec2(0.001), vec2(0.999));
             }
 
             void main() {
               vec2 uv = vUv;
-              vec2 pxToUv = 1.0 / uResolution;
-              vec2 cursorPx = uCursor * uResolution;
-              vec2 fragPx = uv * uResolution;
-              vec2 fromCursor = fragPx - cursorPx;
-              float distPx = length(fromCursor);
-              float angle = atan(fromCursor.y, fromCursor.x);
 
-              float motion = 1.0 - uReducedMotion;
-              float organic = fbm(vec2(cos(angle), sin(angle)) * 2.35 + uv * 2.65 + vec2(uTime * 0.12, -uTime * 0.09));
-              float micro = sin(angle * 4.0 + uTime * 1.2) * 1.05 + sin(angle * 6.8 - uTime * 0.92) * 0.68;
-              float radiusDistorted = uRadius + (organic - 0.5) * 14.0 * motion + micro * motion;
+              vec2 cursor = uCursor;
+              float aspect = uResolution.x / max(uResolution.y, 1.0);
 
-              float mask = 1.0 - smoothstep(radiusDistorted - uFeather, radiusDistorted + uFeather, distPx);
+              vec2 centered = (uv - cursor);
+              centered.x *= aspect;
+              float dist = length(centered);
 
+              float feather = max(uFeather, 0.0001);
+              float mask = smoothstep(uRadius, uRadius + feather, dist);
+
+              float time = uTime * (1.0 - uReducedMotion);
+              float wobble = fbm(uv * 3.0 + vec2(time * 0.15, time * 0.09));
+              float wobble2 = fbm(uv * 7.0 - vec2(time * 0.07, time * 0.11));
+              float ripple = mix(wobble, wobble2, 0.4);
+              mask += (ripple - 0.5) * 0.02 * (1.0 - uReducedMotion);
+              mask = clamp(mask, 0.0, 1.0);
+
+              vec2 pxToUv = vec2(1.0 / max(uResolution.x, 1.0), 1.0 / max(uResolution.y, 1.0));
               vec2 topUv = clampUv(uv + uParallax * pxToUv);
               vec2 underUv = clampUv(uv - uParallax * pxToUv * 1.24);
               vec4 topColor = texture2D(uTop, topUv);
@@ -361,185 +276,161 @@ export default function MouseReveal(): JSX.Element {
               gl_FragColor = vec4(composed.rgb, 1.0);
             }
           `
-        });
+    });
 
-        const geometry = new THREE.PlaneGeometry(2, 2);
-        scene.add(new THREE.Mesh(geometry, material));
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    scene.add(new THREE.Mesh(geometry, material));
 
-        const onResize = (): void => {
-          const width = window.innerWidth;
-          const height = window.innerHeight;
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          renderer.setPixelRatio(dpr);
-          renderer.setSize(width, height, false);
-          uniforms.uResolution.value.set(width, height);
-        };
-        onResize();
-        window.addEventListener("resize", onResize, { passive: true });
+    const onResize = (): void => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(width, height, false);
+      uniforms.uResolution.value.set(width, height);
+    };
+    onResize();
+    window.addEventListener("resize", onResize, { passive: true });
 
-        const animate = (): void => {
-          const now = performance.now();
-          const dt = Math.max(0.001, Math.min(0.05, (now - previous) / 1000));
-          previous = now;
+    const pointer = { x: 0.5, y: 0.5 };
+    const target = { x: 0.5, y: 0.5 };
+    const parallax = { x: 0, y: 0 };
+    const parallaxTarget = { x: 0, y: 0 };
 
-          const stiffness = reducedMotion ? 180 : 130;
-          const damping = reducedMotion ? 24 : 18;
-          pointerVelocityUv.x += (pointerTargetUv.x - pointerCurrentUv.x) * stiffness * dt;
-          pointerVelocityUv.y += (pointerTargetUv.y - pointerCurrentUv.y) * stiffness * dt;
-          pointerVelocityUv.x *= Math.exp(-damping * dt);
-          pointerVelocityUv.y *= Math.exp(-damping * dt);
-          pointerCurrentUv.x += pointerVelocityUv.x * dt;
-          pointerCurrentUv.y += pointerVelocityUv.y * dt;
-
-          pulseVelocity += (-pulse * 90 - pulseVelocity * 18) * dt;
-          pulse += pulseVelocity * dt;
-          const pulseAdd = reducedMotion ? 0 : Math.max(0, pulse);
-          const targetRadius = radiusBase + pulseAdd;
-          radiusVelocity += (targetRadius - radiusCurrent) * (reducedMotion ? 180 : 110) * dt;
-          radiusVelocity *= Math.exp(-(reducedMotion ? 26 : 16) * dt);
-          radiusCurrent += radiusVelocity * dt;
-
-          uniforms.uCursor.value.set(pointerCurrentUv.x, pointerCurrentUv.y);
-          uniforms.uRadius.value = radiusCurrent;
-          uniforms.uParallax.value.set((pointerCurrentUv.x - 0.5) * 17, (pointerCurrentUv.y - 0.5) * 13);
-          uniforms.uTime.value += reducedMotion ? 0 : dt;
-          uniforms.uFeather.value = reducedMotion ? 32 : pressed ? 56 : 46;
-          uniforms.uReducedMotion.value = reducedMotion ? 1 : 0;
-
-          root.style.setProperty("--mx", `${(pointerCurrentUv.x * 100).toFixed(3)}%`);
-          root.style.setProperty("--my", `${((1 - pointerCurrentUv.y) * 100).toFixed(3)}%`);
-          root.style.setProperty("--reveal-radius", `${radiusCurrent.toFixed(2)}px`);
-          root.style.setProperty("--reveal-soft", `${(reducedMotion ? 34 : pressed ? 56 : 46).toFixed(2)}px`);
-          root.style.setProperty("--fallback-top-shift-x", `${((pointerCurrentUv.x - 0.5) * 8).toFixed(2)}px`);
-          root.style.setProperty("--fallback-top-shift-y", `${((pointerCurrentUv.y - 0.5) * 6).toFixed(2)}px`);
-          root.style.setProperty(
-            "--fallback-under-shift-x",
-            `${((-pointerCurrentUv.x + 0.5) * 10).toFixed(2)}px`
-          );
-          root.style.setProperty(
-            "--fallback-under-shift-y",
-            `${((-pointerCurrentUv.y + 0.5) * 8).toFixed(2)}px`
-          );
-          renderer.render(scene, camera);
-          rafId = window.requestAnimationFrame(animate);
-        };
-        animate();
-
-        cleanupWebGL = () => {
-          window.removeEventListener("resize", onResize);
-          window.cancelAnimationFrame(rafId);
-          geometry.dispose();
-          material.dispose();
-          topResult.texture.dispose();
-          underResult.texture.dispose();
-          if (topResult.texture !== topPlaceholder) {
-            topPlaceholder.dispose();
-          }
-          if (underResult.texture !== underPlaceholder) {
-            underPlaceholder.dispose();
-          }
-          renderer.dispose();
-          renderer.domElement.remove();
-        };
-      } catch {
-        setUseCssFallback(true);
-        startCssFallbackLoop();
-      }
+    const updateCssVars = (x: number, y: number): void => {
+      root.style.setProperty("--mx", `${(x * 100).toFixed(3)}%`);
+      root.style.setProperty("--my", `${(y * 100).toFixed(3)}%`);
     };
 
-    void initWebGL();
+    updateCssVars(pointer.x, pointer.y);
+
+    const onPointerMove = (event: PointerEvent): void => {
+      const rect = root.getBoundingClientRect();
+      const x = (event.clientX - rect.left) / rect.width;
+      const y = (event.clientY - rect.top) / rect.height;
+      target.x = Math.min(1, Math.max(0, x));
+      target.y = Math.min(1, Math.max(0, y));
+      updateCssVars(target.x, target.y);
+      parallaxTarget.x = (target.x - 0.5) * 26;
+      parallaxTarget.y = (target.y - 0.5) * 18;
+    };
+
+    root.addEventListener("pointermove", onPointerMove, { passive: true });
+
+    const clock = new THREE.Clock();
+    const animate = (): void => {
+      if (destroyed) return;
+
+      const delta = clock.getDelta();
+      const elapsed = clock.getElapsedTime();
+
+      const lerpAmt = reducedMotion ? 1.0 : 1.0 - Math.pow(0.0006, delta);
+      pointer.x += (target.x - pointer.x) * lerpAmt;
+      pointer.y += (target.y - pointer.y) * lerpAmt;
+      parallax.x += (parallaxTarget.x - parallax.x) * lerpAmt;
+      parallax.y += (parallaxTarget.y - parallax.y) * lerpAmt;
+
+      uniforms.uCursor.value.set(pointer.x, 1.0 - pointer.y);
+      uniforms.uParallax.value.set(parallax.x, -parallax.y);
+      uniforms.uTime.value = elapsed;
+      uniforms.uReducedMotion.value = reducedMotion ? 1.0 : 0.0;
+
+      renderer.render(scene, new THREE.Camera());
+      requestAnimationFrame(animate);
+    };
+    animate();
 
     return () => {
-      cancelled = true;
-      reducedMotionQuery.removeEventListener("change", onReducedMotionChange);
+      destroyed = true;
+      window.removeEventListener("resize", onResize);
       root.removeEventListener("pointermove", onPointerMove);
-      root.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.cancelAnimationFrame(cssRafId);
-      if (cleanupWebGL) {
-        cleanupWebGL();
+      reducedMotionQuery.removeEventListener?.("change", onReducedMotionChange);
+
+      material.dispose();
+      geometry.dispose();
+      placeholderTop.dispose();
+      placeholderUnder.dispose();
+      renderer.dispose();
+
+      if (renderer.domElement.parentNode === host) {
+        host.removeChild(renderer.domElement);
       }
     };
   }, []);
 
-  const topBackground = topLoaded
-    ? `url("${TOP_IMAGE}")`
-    : "linear-gradient(135deg, #f2f6ff 0%, #dee8ff 48%, #c4d1f5 100%)";
-  const underBackground = underLoaded
-    ? `url("${UNDER_IMAGE}")`
-    : "linear-gradient(135deg, #fff3df 0%, #ffd1b2 50%, #dfb4dd 100%)";
+  const rootClass = ["reveal-root", entered ? "is-entered" : "", useCssFallback ? "is-fallback" : ""]
+    .join(" ")
+    .trim();
+
+  const statusClass = [
+    "address-status",
+    status === "loading" ? "is-loading" : "",
+    status === "saved" ? "is-saved" : "",
+    status === "error" ? "is-error" : ""
+  ]
+    .join(" ")
+    .trim();
+
+  const formStyle: CSSProperties = {
+    opacity: underLoaded ? 1 : 0.9
+  };
 
   return (
-    <section
-      ref={rootRef}
-      className={`reveal-root${useCssFallback ? " is-css-fallback" : ""}${entered ? " is-entered" : ""}`}
-      style={
-        {
-          "--top-bg": topBackground,
-          "--under-bg": underBackground
-        } as CSSProperties
-      }
-    >
-      <div ref={canvasHostRef} className="canvas-host" />
-
-      {useCssFallback ? (
-        <div className="css-fallback-layer" aria-hidden>
-          <div className="css-fallback-under" />
-          <div className="css-fallback-top" />
-        </div>
-      ) : null}
+    <div ref={rootRef} className={rootClass} aria-label="Mouse reveal scene">
+      <div className="canvas-host" ref={canvasHostRef} aria-hidden="true" />
+      <div className="css-fallback-layer" aria-hidden={!useCssFallback}>
+        <div className="css-fallback-under" />
+        <div className="css-fallback-top" />
+      </div>
 
       <div className="under-layer-mask">
-        <form className="address-bar" onSubmit={handleAddressSubmit} noValidate>
+        <form className="address-bar" onSubmit={handleAddressSubmit} style={formStyle} aria-label="Monad address form">
           <div className="address-meta">
             <span className="address-label">Monad address</span>
-            <span className="address-helper">Paste and press enter</span>
+            <span className="address-helper">Paste your wallet and confirm</span>
           </div>
-          <label htmlFor="monad-address" className="sr-only">
-            Monad EVM address
-          </label>
           <input
-            id="monad-address"
             className="address-input"
-            type="text"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="0x..."
             inputMode="text"
             autoComplete="off"
             spellCheck={false}
-            placeholder="0x... Monad address"
-            value={address}
-            onChange={(event) => {
-              setAddress(event.target.value);
-              if (status !== "idle") {
-                setStatus("idle");
-                setStatusMessage("");
-              }
-            }}
-            aria-invalid={status === "error"}
+            aria-label="Monad address input"
           />
-          <button
-            type="submit"
-            className="address-submit"
-            aria-label="Submit Monad address"
-            disabled={status === "loading"}
-          >
-            {status === "loading" ? <span className="spinner" aria-hidden /> : <span aria-hidden>↗</span>}
+          <button className="address-submit" type="submit" disabled={status === "loading"} aria-label="Confirm address">
+            {status === "loading" ? <span className="spinner" aria-hidden="true" /> : "✓"}
           </button>
-          <div className={`address-status is-${status}`} aria-live="polite">
+          <div className={statusClass} aria-live="polite">
             {statusMessage}
           </div>
         </form>
       </div>
 
-      <div className="hint-icon" aria-hidden>
-        <svg viewBox="0 0 24 24" fill="none" role="img" aria-label="cursor hint icon">
+      <span className="hint-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
           <path
-            d="M12 2L13.8 8.2L20 10L13.8 11.8L12 18L10.2 11.8L4 10L10.2 8.2L12 2Z"
+            d="M12 5c3.314 0 6 2.686 6 6 0 2.123-1.103 3.99-2.76 5.048-.71.456-1.24 1.225-1.24 2.07V19H10v-.832c0-.847-.53-1.616-1.24-2.072C7.103 14.99 6 13.123 6 11c0-3.314 2.686-6 6-6Z"
             stroke="currentColor"
-            strokeWidth="1.2"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M10 21h4"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
             strokeLinejoin="round"
           />
         </svg>
-      </div>
-    </section>
+      </span>
+
+      <span className="sr-only">
+        {useCssFallback ? "Fallback mode active." : ""}
+        {!topLoaded || !underLoaded ? "Some images failed to load." : ""}
+      </span>
+    </div>
   );
 }

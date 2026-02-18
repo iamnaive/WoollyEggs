@@ -1,4 +1,5 @@
 import { kv } from "@vercel/kv";
+import { BASE_SET } from "../src/lib/baseAddresses";
 
 const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -41,20 +42,20 @@ function hasKvConfig(): boolean {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 }
 
+async function storeConfirmedAddress(address: string): Promise<boolean> {
+  if (!hasKvConfig()) {
+    return false;
+  }
+
+  const result = await kv.sadd("we:confirmed", address);
+  return Number(result) > 0;
+}
+
 export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
   res.setHeader("Content-Type", "application/json");
 
   if (req.method !== "POST") {
     res.status(405).json({ ok: false, error: "Method not allowed. Use POST." });
-    return;
-  }
-
-  if (!hasKvConfig()) {
-    res.status(500).json({
-      ok: false,
-      error:
-        "Vercel KV is not configured. Add KV_REST_API_URL and KV_REST_API_TOKEN in Vercel, then redeploy."
-    });
     return;
   }
 
@@ -66,13 +67,16 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
 
   try {
     const normalized = address.toLowerCase();
-    const key = `monad:addr:${normalized}`;
-    const now = Date.now().toString();
+    const verified = BASE_SET.has(normalized);
 
-    const inserted = await kv.set(key, now, { nx: true });
-    await kv.sadd("monad:addrs", normalized);
+    if (!verified) {
+      res.status(200).json({ ok: true, verified: false });
+      return;
+    }
 
-    res.status(200).json({ ok: true, inserted: Boolean(inserted) });
+    const inserted = await storeConfirmedAddress(normalized);
+
+    res.status(200).json({ ok: true, verified: true, inserted });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected KV error";
     res.status(500).json({ ok: false, error: message });
