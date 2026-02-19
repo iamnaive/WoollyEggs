@@ -28,6 +28,7 @@ function loadTexture(loader: THREE.TextureLoader, path: string): Promise<THREE.T
 export default function MouseReveal(): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
+  const submitButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [useCssFallback, setUseCssFallback] = useState(false);
   const [topLoaded, setTopLoaded] = useState(true);
@@ -37,6 +38,29 @@ export default function MouseReveal(): JSX.Element {
   const [address, setAddress] = useState("");
   const [status, setStatus] = useState<CaptureStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("");
+
+  const revealPulseRef = useRef<{ active: boolean; startedAtMs: number; x: number; y: number }>({
+    active: false,
+    startedAtMs: 0,
+    x: 0.5,
+    y: 0.5
+  });
+
+  const startVerifiedRevealFromButton = (): void => {
+    const root = rootRef.current;
+    const button = submitButtonRef.current;
+    if (!root || !button) return;
+    const rootRect = root.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const cx = (buttonRect.left + buttonRect.width * 0.5 - rootRect.left) / rootRect.width;
+    const cy = (buttonRect.top + buttonRect.height * 0.5 - rootRect.top) / rootRect.height;
+    revealPulseRef.current = {
+      active: true,
+      startedAtMs: performance.now(),
+      x: Math.min(1, Math.max(0, cx)),
+      y: Math.min(1, Math.max(0, 1 - cy))
+    };
+  };
 
   useEffect(() => {
     const t = window.setTimeout(() => setEntered(true), 30);
@@ -72,6 +96,7 @@ export default function MouseReveal(): JSX.Element {
       if (data.verified) {
         setStatus("saved");
         setStatusMessage("Your address is verified");
+        startVerifiedRevealFromButton();
         try {
           const key = "we_verified_addresses";
           const existing = JSON.parse(localStorage.getItem(key) || "[]") as string[];
@@ -169,6 +194,8 @@ export default function MouseReveal(): JSX.Element {
         uParallax: { value: new THREE.Vector2(0.0, 0.0) },
         uRadius: { value: 0.18 },
         uFeather: { value: 0.08 },
+        uRevealCenter: { value: new THREE.Vector2(0.5, 0.5) },
+        uRevealProgress: { value: 0.0 },
         uTime: { value: 0.0 },
         uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 }
       };
@@ -191,6 +218,8 @@ export default function MouseReveal(): JSX.Element {
             uniform vec2 uParallax;
             uniform float uRadius;
             uniform float uFeather;
+            uniform vec2 uRevealCenter;
+            uniform float uRevealProgress;
             uniform float uTime;
             uniform float uReducedMotion;
 
@@ -238,12 +267,24 @@ export default function MouseReveal(): JSX.Element {
               float feather = max(uFeather, 0.0001);
               float mask = smoothstep(uRadius, uRadius + feather, dist);
 
+              vec2 revealCentered = (uv - uRevealCenter);
+              revealCentered.x *= aspect;
+              float revealDist = length(revealCentered);
+              float revealMaxRadius = mix(0.0, 2.2, clamp(uRevealProgress, 0.0, 1.0));
+              float revealSoft = 0.06;
+              float revealMask = smoothstep(
+                max(revealMaxRadius - revealSoft, 0.0),
+                revealMaxRadius + revealSoft,
+                revealDist
+              );
+
               float time = uTime * (1.0 - uReducedMotion);
               float wobble = fbm(uv * 3.0 + vec2(time * 0.15, time * 0.09));
               float wobble2 = fbm(uv * 7.0 - vec2(time * 0.07, time * 0.11));
               float ripple = mix(wobble, wobble2, 0.4);
               mask += (ripple - 0.5) * 0.02 * (1.0 - uReducedMotion);
               mask = clamp(mask, 0.0, 1.0);
+              mask = min(mask, revealMask);
 
               vec2 pxToUv = vec2(1.0 / max(uResolution.x, 1.0), 1.0 / max(uResolution.y, 1.0));
               vec2 topUv = clampUv(uv + uParallax * pxToUv);
@@ -275,6 +316,17 @@ export default function MouseReveal(): JSX.Element {
         material.uniforms.uParallax.value.set(parallax.x, -parallax.y);
         material.uniforms.uTime.value = elapsed;
         material.uniforms.uReducedMotion.value = reducedMotion ? 1.0 : 0.0;
+        const reveal = revealPulseRef.current;
+        if (reveal.active) {
+          const durationMs = 3600;
+          const linear = Math.min(1, Math.max(0, (performance.now() - reveal.startedAtMs) / durationMs));
+          const eased = 1 - Math.pow(1 - linear, 3);
+          material.uniforms.uRevealCenter.value.set(reveal.x, reveal.y);
+          material.uniforms.uRevealProgress.value = eased;
+          if (linear >= 1) {
+            reveal.active = false;
+          }
+        }
 
         renderer.render(scene, new THREE.Camera());
         requestAnimationFrame(animate);
@@ -381,7 +433,13 @@ export default function MouseReveal(): JSX.Element {
             spellCheck={false}
             aria-label="Monad address input"
           />
-          <button className="address-submit" type="submit" disabled={status === "loading"} aria-label="Confirm address">
+          <button
+            ref={submitButtonRef}
+            className={`address-submit${status === "saved" ? " is-verified" : ""}`}
+            type="submit"
+            disabled={status === "loading"}
+            aria-label="Confirm address"
+          >
             {status === "loading" ? <span className="spinner" aria-hidden="true" /> : "✓"}
           </button>
           <div className={statusClass} aria-live="polite">

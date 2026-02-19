@@ -248,9 +248,29 @@ body {
   transform: translateY(1px) scale(0.98);
 }
 
+.address-submit.is-verified {
+  background: linear-gradient(145deg, #47cc86 0%, #2ea463 100%);
+  box-shadow:
+    0 12px 28px #1f7f4f80,
+    0 0 0 1px #7ce0a840 inset;
+  animation: verified-pop 760ms cubic-bezier(0.2, 0.88, 0.25, 1);
+}
+
 .address-submit:disabled {
   opacity: 0.9;
   cursor: default;
+}
+
+@keyframes verified-pop {
+  0% {
+    transform: scale(0.9);
+  }
+  40% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .spinner {
