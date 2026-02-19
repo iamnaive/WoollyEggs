@@ -39,11 +39,12 @@ export default function MouseReveal(): JSX.Element {
   const [status, setStatus] = useState<CaptureStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("");
 
-  const revealPulseRef = useRef<{ active: boolean; startedAtMs: number; x: number; y: number }>({
-    active: false,
+  const revealPulseRef = useRef<{ running: boolean; startedAtMs: number; x: number; y: number; progress: number }>({
+    running: false,
     startedAtMs: 0,
     x: 0.5,
-    y: 0.5
+    y: 0.5,
+    progress: 0
   });
 
   const startVerifiedRevealFromButton = (): void => {
@@ -55,10 +56,11 @@ export default function MouseReveal(): JSX.Element {
     const cx = (buttonRect.left + buttonRect.width * 0.5 - rootRect.left) / rootRect.width;
     const cy = (buttonRect.top + buttonRect.height * 0.5 - rootRect.top) / rootRect.height;
     revealPulseRef.current = {
-      active: true,
+      running: true,
       startedAtMs: performance.now(),
       x: Math.min(1, Math.max(0, cx)),
-      y: Math.min(1, Math.max(0, 1 - cy))
+      y: Math.min(1, Math.max(0, 1 - cy)),
+      progress: 0
     };
   };
 
@@ -157,7 +159,8 @@ export default function MouseReveal(): JSX.Element {
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.toneMappingExposure = 1;
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const initialTallMobile = window.innerWidth <= 520 && window.innerHeight > window.innerWidth;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, initialTallMobile ? 1.5 : 2));
     host.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -196,6 +199,7 @@ export default function MouseReveal(): JSX.Element {
         uFeather: { value: 0.08 },
         uRevealCenter: { value: new THREE.Vector2(0.5, 0.5) },
         uRevealProgress: { value: 0.0 },
+        uRevealActive: { value: 0.0 },
         uTime: { value: 0.0 },
         uReducedMotion: { value: reducedMotion ? 1.0 : 0.0 }
       };
@@ -220,6 +224,7 @@ export default function MouseReveal(): JSX.Element {
             uniform float uFeather;
             uniform vec2 uRevealCenter;
             uniform float uRevealProgress;
+            uniform float uRevealActive;
             uniform float uTime;
             uniform float uReducedMotion;
 
@@ -267,24 +272,12 @@ export default function MouseReveal(): JSX.Element {
               float feather = max(uFeather, 0.0001);
               float mask = smoothstep(uRadius, uRadius + feather, dist);
 
-              vec2 revealCentered = (uv - uRevealCenter);
-              revealCentered.x *= aspect;
-              float revealDist = length(revealCentered);
-              float revealMaxRadius = mix(0.0, 2.2, clamp(uRevealProgress, 0.0, 1.0));
-              float revealSoft = 0.06;
-              float revealMask = 1.0 - smoothstep(
-                max(revealMaxRadius - revealSoft, 0.0),
-                revealMaxRadius + revealSoft,
-                revealDist
-              );
-
               float time = uTime * (1.0 - uReducedMotion);
               float wobble = fbm(uv * 3.0 + vec2(time * 0.15, time * 0.09));
               float wobble2 = fbm(uv * 7.0 - vec2(time * 0.07, time * 0.11));
               float ripple = mix(wobble, wobble2, 0.4);
               mask += (ripple - 0.5) * 0.02 * (1.0 - uReducedMotion);
               mask = clamp(mask, 0.0, 1.0);
-              mask = max(mask, revealMask);
 
               vec2 pxToUv = vec2(1.0 / max(uResolution.x, 1.0), 1.0 / max(uResolution.y, 1.0));
               vec2 topUv = clampUv(uv + uParallax * pxToUv);
@@ -292,6 +285,19 @@ export default function MouseReveal(): JSX.Element {
               vec4 topColor = texture2D(uTop, topUv);
               vec4 underColor = texture2D(uUnder, underUv);
               vec4 composed = mix(topColor, underColor, mask);
+              if (uRevealActive > 0.5) {
+                vec2 revealCentered = (uv - uRevealCenter);
+                revealCentered.x *= aspect;
+                float revealDist = length(revealCentered);
+                float revealMaxRadius = mix(0.0, 2.2, clamp(uRevealProgress, 0.0, 1.0));
+                float revealSoft = 0.08;
+                float revealWipe = 1.0 - smoothstep(
+                  max(revealMaxRadius - revealSoft, 0.0),
+                  revealMaxRadius + revealSoft,
+                  revealDist
+                );
+                composed = mix(composed, topColor, revealWipe);
+              }
               gl_FragColor = vec4(composed.rgb, 1.0);
             }
           `
@@ -317,16 +323,18 @@ export default function MouseReveal(): JSX.Element {
         material.uniforms.uTime.value = elapsed;
         material.uniforms.uReducedMotion.value = reducedMotion ? 1.0 : 0.0;
         const reveal = revealPulseRef.current;
-        if (reveal.active) {
+        if (reveal.running) {
           const durationMs = 3600;
           const linear = Math.min(1, Math.max(0, (performance.now() - reveal.startedAtMs) / durationMs));
           const eased = 1 - Math.pow(1 - linear, 3);
-          material.uniforms.uRevealCenter.value.set(reveal.x, reveal.y);
-          material.uniforms.uRevealProgress.value = eased;
+          reveal.progress = eased;
           if (linear >= 1) {
-            reveal.active = false;
+            reveal.running = false;
           }
         }
+        material.uniforms.uRevealCenter.value.set(reveal.x, reveal.y);
+        material.uniforms.uRevealProgress.value = reveal.progress;
+        material.uniforms.uRevealActive.value = reveal.progress > 0 ? 1.0 : 0.0;
 
         renderer.render(scene, new THREE.Camera());
         requestAnimationFrame(animate);
@@ -337,7 +345,8 @@ export default function MouseReveal(): JSX.Element {
     const onResize = (): void => {
       const width = window.innerWidth;
       const height = window.innerHeight;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const isTallMobile = width <= 520 && height > width;
+      const dpr = Math.min(window.devicePixelRatio || 1, isTallMobile ? 1.5 : 2);
       renderer.setPixelRatio(dpr);
       renderer.setSize(width, height, false);
       if (material) {
