@@ -1,5 +1,3 @@
-import { kv } from "@vercel/kv";
-
 const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
 type ApiRequest = {
@@ -37,10 +35,6 @@ function parseAddress(req: ApiRequest): string {
   return "";
 }
 
-function hasKvConfig(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
-}
-
 function getDatabaseUrl(): string {
   return (
     process.env.DATABASE_URL_UNPOOLED ||
@@ -74,15 +68,26 @@ async function isAllowlisted(address: string): Promise<boolean> {
 }
 
 async function storeConfirmedAddress(address: string): Promise<boolean> {
-  if (!hasKvConfig()) {
+  const connectionString = getDatabaseUrl();
+  if (!connectionString) {
     return false;
   }
 
   try {
-    const result = await kv.sadd("we:confirmed", address);
-    return Number(result) > 0;
+    const pgModule = await import("pg");
+    const { Client } = pgModule.default ?? pgModule;
+    const client = new Client({ connectionString });
+    await client.connect();
+    try {
+      const result = await client.query(
+        "INSERT INTO confirmed_addresses(address) VALUES ($1) ON CONFLICT (address) DO NOTHING",
+        [address]
+      );
+      return (result.rowCount ?? 0) > 0;
+    } finally {
+      await client.end();
+    }
   } catch {
-    // Verification must not fail if confirmed-store is unavailable.
     return false;
   }
 }
@@ -114,7 +119,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
 
     res.status(200).json({ ok: true, verified: true, inserted });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected KV error";
+    const message = error instanceof Error ? error.message : "Unexpected server error";
     res.status(500).json({ ok: false, error: message });
   }
 }

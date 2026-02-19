@@ -272,7 +272,7 @@ export default function MouseReveal(): JSX.Element {
               float revealDist = length(revealCentered);
               float revealMaxRadius = mix(0.0, 2.2, clamp(uRevealProgress, 0.0, 1.0));
               float revealSoft = 0.06;
-              float revealMask = smoothstep(
+              float revealMask = 1.0 - smoothstep(
                 max(revealMaxRadius - revealSoft, 0.0),
                 revealMaxRadius + revealSoft,
                 revealDist
@@ -284,7 +284,7 @@ export default function MouseReveal(): JSX.Element {
               float ripple = mix(wobble, wobble2, 0.4);
               mask += (ripple - 0.5) * 0.02 * (1.0 - uReducedMotion);
               mask = clamp(mask, 0.0, 1.0);
-              mask = min(mask, revealMask);
+              mask = max(mask, revealMask);
 
               vec2 pxToUv = vec2(1.0 / max(uResolution.x, 1.0), 1.0 / max(uResolution.y, 1.0));
               vec2 topUv = clampUv(uv + uParallax * pxToUv);
