@@ -84,8 +84,8 @@ body {
 
 .reveal-root.is-verified-reveal .under-layer-mask,
 .reveal-root.is-verified-revealed .under-layer-mask {
-  mask-image: none;
-  -webkit-mask-image: none;
+  mask-image: radial-gradient(circle at var(--verify-x) var(--verify-y), #ffffff 0, #ffffff var(--verify-r), transparent calc(var(--verify-r) + 1px));
+  -webkit-mask-image: radial-gradient(circle at var(--verify-x) var(--verify-y), #ffffff 0, #ffffff var(--verify-r), transparent calc(var(--verify-r) + 1px));
 }
 
 .canvas-host {

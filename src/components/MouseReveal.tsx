@@ -102,6 +102,9 @@ export default function MouseReveal(): JSX.Element {
 
   const handleAddressSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
+    if (status === "saved") {
+      return;
+    }
     const trimmed = address.trim();
     if (!ADDRESS_REGEX.test(trimmed)) {
       setStatus("error");
@@ -475,7 +478,24 @@ export default function MouseReveal(): JSX.Element {
           <input
             className="address-input"
             value={address}
-            onChange={(e) => setAddress(e.target.value)}
+            onChange={(e) => {
+              setAddress(e.target.value);
+              if (status !== "idle") {
+                setStatus("idle");
+                setStatusMessage("");
+              }
+              if (verifiedRevealActive || verifiedRevealDone) {
+                setVerifiedRevealActive(false);
+                setVerifiedRevealDone(false);
+                revealPulseRef.current.running = false;
+                revealPulseRef.current.progress = 0;
+                if (revealRafRef.current !== null) {
+                  cancelAnimationFrame(revealRafRef.current);
+                  revealRafRef.current = null;
+                }
+                rootRef.current?.style.setProperty("--verify-r", "0px");
+              }
+            }}
             placeholder="0x..."
             inputMode="text"
             autoComplete="off"
@@ -486,7 +506,7 @@ export default function MouseReveal(): JSX.Element {
             ref={submitButtonRef}
             className={`address-submit${status === "saved" ? " is-verified" : ""}`}
             type="submit"
-            disabled={status === "loading"}
+            disabled={status === "loading" || status === "saved"}
             aria-label="Confirm address"
           >
             {status === "loading" ? <span className="spinner" aria-hidden="true" /> : "✓"}
