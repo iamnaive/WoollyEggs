@@ -1,5 +1,4 @@
 import { kv } from "@vercel/kv";
-import { Client } from "pg";
 import { BASE_SET } from "../src/lib/baseAddresses";
 
 const ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
@@ -57,6 +56,8 @@ async function isAllowlisted(address: string): Promise<boolean> {
   const connectionString = getDatabaseUrl();
   if (connectionString) {
     try {
+      const pgModule = await import("pg");
+      const { Client } = pgModule.default ?? pgModule;
       const client = new Client({ connectionString });
       await client.connect();
       try {
