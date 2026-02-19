@@ -45,10 +45,10 @@ function hasKvConfig(): boolean {
 
 function getDatabaseUrl(): string {
   return (
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_URL ||
     process.env.DATABASE_URL_UNPOOLED ||
     process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
     ""
   );
 }
@@ -56,13 +56,18 @@ function getDatabaseUrl(): string {
 async function isAllowlisted(address: string): Promise<boolean> {
   const connectionString = getDatabaseUrl();
   if (connectionString) {
-    const client = new Client({ connectionString });
-    await client.connect();
     try {
-      const result = await client.query("SELECT 1 FROM allowlist_addresses WHERE address = $1 LIMIT 1", [address]);
-      return (result.rowCount ?? 0) > 0;
-    } finally {
-      await client.end();
+      const client = new Client({ connectionString });
+      await client.connect();
+      try {
+        const result = await client.query("SELECT 1 FROM allowlist_addresses WHERE address = $1 LIMIT 1", [address]);
+        return (result.rowCount ?? 0) > 0;
+      } finally {
+        await client.end();
+      }
+    } catch {
+      // If DB is temporarily unavailable, do not crash API.
+      return BASE_SET.has(address);
     }
   }
 
@@ -74,8 +79,13 @@ async function storeConfirmedAddress(address: string): Promise<boolean> {
     return false;
   }
 
-  const result = await kv.sadd("we:confirmed", address);
-  return Number(result) > 0;
+  try {
+    const result = await kv.sadd("we:confirmed", address);
+    return Number(result) > 0;
+  } catch {
+    // Verification must not fail if confirmed-store is unavailable.
+    return false;
+  }
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
