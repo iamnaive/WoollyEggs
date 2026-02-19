@@ -43,25 +43,27 @@ function hasKvConfig(): boolean {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 }
 
-function hasDatabaseConfig(): boolean {
-  return Boolean(process.env.DATABASE_URL);
-}
-
-let dbClientPromise: Promise<Client> | null = null;
-
-async function getDbClient(): Promise<Client> {
-  if (!dbClientPromise) {
-    const client = new Client({ connectionString: process.env.DATABASE_URL });
-    dbClientPromise = client.connect().then(() => client);
-  }
-  return dbClientPromise;
+function getDatabaseUrl(): string {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    ""
+  );
 }
 
 async function isAllowlisted(address: string): Promise<boolean> {
-  if (hasDatabaseConfig()) {
-    const client = await getDbClient();
-    const result = await client.query("SELECT 1 FROM allowlist_addresses WHERE address = $1 LIMIT 1", [address]);
-    return (result.rowCount ?? 0) > 0;
+  const connectionString = getDatabaseUrl();
+  if (connectionString) {
+    const client = new Client({ connectionString });
+    await client.connect();
+    try {
+      const result = await client.query("SELECT 1 FROM allowlist_addresses WHERE address = $1 LIMIT 1", [address]);
+      return (result.rowCount ?? 0) > 0;
+    } finally {
+      await client.end();
+    }
   }
 
   return BASE_SET.has(address);
