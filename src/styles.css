@@ -82,6 +82,12 @@ body {
   opacity: 1;
 }
 
+.reveal-root.is-verified-reveal .under-layer-mask,
+.reveal-root.is-verified-revealed .under-layer-mask {
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
 .canvas-host {
   position: absolute;
   inset: 0;
