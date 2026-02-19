@@ -69,7 +69,7 @@ body {
   z-index: 4;
   pointer-events: none;
   opacity: 0;
-  background-image: var(--top-bg);
+  background-image: var(--under-bg);
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
@@ -80,10 +80,6 @@ body {
 .reveal-root.is-verified-reveal::after,
 .reveal-root.is-verified-revealed::after {
   opacity: 1;
-}
-
-.reveal-root.is-verified-revealed .under-layer-mask {
-  display: none;
 }
 
 .canvas-host {
