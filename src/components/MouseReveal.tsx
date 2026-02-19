@@ -29,6 +29,7 @@ export default function MouseReveal(): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const submitButtonRef = useRef<HTMLButtonElement | null>(null);
+  const revealRafRef = useRef<number | null>(null);
 
   const [useCssFallback, setUseCssFallback] = useState(false);
   const [topLoaded, setTopLoaded] = useState(true);
@@ -38,6 +39,8 @@ export default function MouseReveal(): JSX.Element {
   const [address, setAddress] = useState("");
   const [status, setStatus] = useState<CaptureStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("");
+  const [verifiedRevealActive, setVerifiedRevealActive] = useState(false);
+  const [verifiedRevealDone, setVerifiedRevealDone] = useState(false);
 
   const revealPulseRef = useRef<{ running: boolean; startedAtMs: number; x: number; y: number; progress: number }>({
     running: false,
@@ -62,6 +65,34 @@ export default function MouseReveal(): JSX.Element {
       y: Math.min(1, Math.max(0, 1 - cy)),
       progress: 0
     };
+
+    const cxCss = Math.min(1, Math.max(0, cx)) * 100;
+    const cyCss = Math.min(1, Math.max(0, cy)) * 100;
+    const maxRadiusPx = Math.hypot(rootRect.width, rootRect.height);
+    root.style.setProperty("--verify-x", `${cxCss.toFixed(3)}%`);
+    root.style.setProperty("--verify-y", `${cyCss.toFixed(3)}%`);
+    root.style.setProperty("--verify-r", "0px");
+    setVerifiedRevealDone(false);
+    setVerifiedRevealActive(true);
+
+    if (revealRafRef.current !== null) {
+      cancelAnimationFrame(revealRafRef.current);
+    }
+    const startedAt = performance.now();
+    const durationMs = 3600;
+    const step = (now: number): void => {
+      const t = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
+      const eased = 1 - Math.pow(1 - t, 3);
+      root.style.setProperty("--verify-r", `${(maxRadiusPx * eased).toFixed(2)}px`);
+      if (t < 1) {
+        revealRafRef.current = requestAnimationFrame(step);
+      } else {
+        revealRafRef.current = null;
+        setVerifiedRevealActive(false);
+        setVerifiedRevealDone(true);
+      }
+    };
+    revealRafRef.current = requestAnimationFrame(step);
   };
 
   useEffect(() => {
@@ -384,6 +415,9 @@ export default function MouseReveal(): JSX.Element {
     const clock = new THREE.Clock();
 
     return () => {
+      if (revealRafRef.current !== null) {
+        cancelAnimationFrame(revealRafRef.current);
+      }
       destroyed = true;
       window.removeEventListener("resize", onResize);
       root.removeEventListener("pointermove", onPointerMove);
@@ -401,7 +435,13 @@ export default function MouseReveal(): JSX.Element {
     };
   }, []);
 
-  const rootClass = ["reveal-root", entered ? "is-entered" : "", useCssFallback ? "is-fallback" : ""]
+  const rootClass = [
+    "reveal-root",
+    entered ? "is-entered" : "",
+    useCssFallback ? "is-fallback" : "",
+    verifiedRevealActive ? "is-verified-reveal" : "",
+    verifiedRevealDone ? "is-verified-revealed" : ""
+  ]
     .join(" ")
     .trim();
 

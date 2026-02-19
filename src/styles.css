@@ -49,6 +49,9 @@ body {
   --fallback-top-shift-y: 0px;
   --fallback-under-shift-x: 0px;
   --fallback-under-shift-y: 0px;
+  --verify-x: 50%;
+  --verify-y: 50%;
+  --verify-r: 0px;
   transform: translate3d(0, 12px, 0) scale(0.992);
   opacity: 0;
   transition: transform 600ms cubic-bezier(0.19, 0.9, 0.2, 1), opacity 600ms ease;
@@ -57,6 +60,30 @@ body {
 .reveal-root.is-entered {
   transform: translate3d(0, 0, 0) scale(1);
   opacity: 1;
+}
+
+.reveal-root::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  background-image: var(--top-bg);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  mask-image: radial-gradient(circle at var(--verify-x) var(--verify-y), #ffffff 0, #ffffff var(--verify-r), transparent calc(var(--verify-r) + 1px));
+  -webkit-mask-image: radial-gradient(circle at var(--verify-x) var(--verify-y), #ffffff 0, #ffffff var(--verify-r), transparent calc(var(--verify-r) + 1px));
+}
+
+.reveal-root.is-verified-reveal::after,
+.reveal-root.is-verified-revealed::after {
+  opacity: 1;
+}
+
+.reveal-root.is-verified-revealed .under-layer-mask {
+  display: none;
 }
 
 .canvas-host {
